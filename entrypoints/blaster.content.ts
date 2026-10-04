@@ -1,7 +1,7 @@
 import { capturePage } from '@/lib/capture';
 import { Game } from '@/lib/game/game';
 import { P } from '@/lib/palette';
-import { addStats, settingsItem } from '@/lib/settings';
+import { addStats, loadSettings, settingsItem, statsItem } from '@/lib/settings';
 
 const FONT = 'WBPixel';
 
@@ -28,13 +28,15 @@ export default defineContentScript({
     window.__webBlaster = session;
 
     try {
-      const [settings] = await Promise.all([settingsItem.getValue(), loadFont()]);
+      const [settings, stats] = await Promise.all([loadSettings(), statsItem.getValue(), loadFont()]);
       const capture = await capturePage(settings.maxScreens, null);
       session.game = new Game(capture, settings, {
+        stage: stats.pagesDestroyed + 1,
         onQuit: () => {
           delete window.__webBlaster;
         },
-        onStats: ({ won, shots, pixels }) => void addStats({ pagesDestroyed: won ? 1 : 0, shotsFired: shots, pixelsBlasted: pixels }),
+        onStats: ({ won, shots, pixels, hiScore }) =>
+          void addStats({ pagesDestroyed: won ? 1 : 0, shotsFired: shots, pixelsBlasted: pixels, hiScore }),
         onSettings: (s) => void settingsItem.setValue(s),
       });
     } catch (e) {

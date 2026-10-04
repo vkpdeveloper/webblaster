@@ -79,6 +79,28 @@ export class Sfx {
     this.tone('square', 160, 50, 0.1, 0.1);
   }
 
+  enemyShot(): void {
+    if (!this.ready() || !this.throttle('eshot', 60)) return;
+    this.tone('square', 420, 180, 0.07, 0.08);
+  }
+
+  enemyDie(): void {
+    if (!this.ready() || !this.throttle('edie', 50)) return;
+    this.noise(0.25, 0.3, 1800, 'lowpass', 200);
+    this.tone('square', 300, 60, 0.22, 0.12);
+  }
+
+  playerDie(): void {
+    if (!this.ready()) return;
+    [660, 520, 400, 300, 220, 160].forEach((f, i) => this.tone('square', f, f * 0.9, 0.09, 0.16, i * 0.07));
+    this.noise(0.5, 0.35, 1200, 'lowpass', 100);
+  }
+
+  respawn(): void {
+    if (!this.ready()) return;
+    [392, 523, 659, 784].forEach((f, i) => this.tone('triangle', f, f, 0.08, 0.14, i * 0.05));
+  }
+
   jump(): void {
     if (!this.ready()) return;
     this.tone('square', 260, 520, 0.12, 0.14);

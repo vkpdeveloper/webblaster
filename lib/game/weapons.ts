@@ -10,8 +10,9 @@ export interface Weapon {
   cooldown: number;
   kind: ShotKind | 'laser';
   pellets: number;
-  /** Random spread in radians. */
+  /** Spread in radians: random per shot, or an even fan when `fan` is set. */
   spread: number;
+  fan?: boolean;
   /** Cells per second. */
   speed: number;
   /** Carve radius in cells. */
@@ -19,15 +20,18 @@ export interface Weapon {
   /** Seconds a projectile lives. */
   life: number;
   color: string;
+  /** How the projectile is drawn. */
+  look?: 'dot' | 'ball';
   recoil: number;
   shake: number;
   sound?: ShotSound;
 }
 
+// The classic run-and-gun arsenal: rifle, machine gun, spread, plus rockets and a laser for wrecking pages.
 export const WEAPONS: Weapon[] = [
-  { id: 'blaster', cooldown: 0.16, kind: 'bullet', pellets: 1, spread: 0.02, speed: 720, radius: 4, life: 1, color: P.yellow, recoil: 0, shake: 1, sound: 'blaster' },
-  { id: 'smg', cooldown: 0.055, kind: 'bullet', pellets: 1, spread: 0.09, speed: 780, radius: 3, life: 1, color: P.orange, recoil: 0, shake: 0.6, sound: 'smg' },
-  { id: 'shotgun', cooldown: 0.65, kind: 'bullet', pellets: 8, spread: 0.3, speed: 620, radius: 3.6, life: 0.32, color: P.peach, recoil: 70, shake: 5, sound: 'shotgun' },
+  { id: 'rifle', cooldown: 0.14, kind: 'bullet', pellets: 1, spread: 0.01, speed: 760, radius: 4, life: 1, color: P.white, look: 'dot', recoil: 0, shake: 1, sound: 'blaster' },
+  { id: 'machine', cooldown: 0.06, kind: 'bullet', pellets: 1, spread: 0.05, speed: 820, radius: 3, life: 1, color: P.white, look: 'dot', recoil: 0, shake: 0.6, sound: 'smg' },
+  { id: 'spread', cooldown: 0.3, kind: 'bullet', pellets: 5, spread: 0.32, fan: true, speed: 560, radius: 3.8, life: 0.9, color: P.red, look: 'ball', recoil: 0, shake: 2, sound: 'shotgun' },
   { id: 'rocket', cooldown: 0.8, kind: 'rocket', pellets: 1, spread: 0, speed: 280, radius: 24, life: 3, color: P.red, recoil: 45, shake: 3, sound: 'rocket' },
   { id: 'laser', cooldown: 1 / 60, kind: 'laser', pellets: 1, spread: 0, speed: 0, radius: 3.2, life: 0, color: P.pink, recoil: 0, shake: 0.4 },
 ];

@@ -2,7 +2,7 @@ import { P } from '../palette';
 import { ICONS, WEAPON_ART, iconUrl } from './sprites';
 import { WEAPONS } from './weapons';
 
-export type MenuAction = 'resume' | 'restart' | 'sound' | 'crt' | 'quit' | 'keep';
+export type MenuAction = 'resume' | 'restart' | 'sound' | 'crt' | 'enemies' | 'quit' | 'keep' | 'continue';
 
 export interface MenuItem {
   act: MenuAction;
@@ -31,38 +31,40 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; cursor: n
 .root:not(.crt-on) .crt { display: none; }
 @keyframes flicker { 0%, 100% { opacity: 1; } 47% { opacity: 0.85; } 48% { opacity: 1; } 91% { opacity: 0.9; } }
 
-.panel { background: ${P.black}; padding: 6px 10px;
-  box-shadow: ${px(P.white, 2)}, 4px 4px 0 2px rgba(0,0,0,0.6); }
+.panel { background: rgba(0,0,0,0.82); padding: 5px 8px;
+  box-shadow: ${px(P.white, 2)}, 3px 3px 0 2px rgba(0,0,0,0.5); }
 .label { color: ${P.lavender}; }
 .hud { position: absolute; inset: 0; pointer-events: none; }
-.top { position: absolute; top: 14px; left: 14px; right: 14px; display: flex; gap: 18px; align-items: flex-start; }
-.title { display: flex; flex-direction: column; gap: 2px; max-width: 30%; }
-.logo { color: ${P.yellow}; text-shadow: 2px 2px 0 ${P.red}; }
-.logo b { color: ${P.blue}; font-weight: normal; text-shadow: 2px 2px 0 ${P.navy}; }
-.host { color: ${P.silver}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; }
-.meter { flex: 1; display: flex; align-items: center; gap: 10px; max-width: 520px; margin: 0 auto; }
-.bar { flex: 1; height: 12px; background: ${P.navy}; position: relative; box-shadow: ${px(P.black, 2)}; }
+/* Arcade top bar: player score and lives left, wreck meter center, clock right. */
+.top { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; align-items: flex-start; }
+.player { display: flex; flex-direction: column; gap: 4px; font-size: 9px; background: rgba(0,0,0,0.82); padding: 5px 8px;
+  box-shadow: ${px(P.white, 2)}, 3px 3px 0 2px rgba(0,0,0,0.5); }
+.player .p1 { color: ${P.red}; margin-right: 8px; }
+.player .score { color: ${P.white}; letter-spacing: 1px; }
+.lives { display: flex; gap: 4px; min-height: 18px; }
+.lives img { image-rendering: pixelated; display: block; }
+.meter { display: flex; align-items: center; gap: 8px; width: min(300px, 34vw); font-size: 8px; }
+.bar { flex: 1; height: 8px; background: ${P.navy}; position: relative; box-shadow: ${px(P.black, 2)}; }
 .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
-  background: repeating-linear-gradient(90deg, var(--fill, ${P.lime}) 0 6px, transparent 6px 8px); transition: width 0.15s steps(4); }
-.pct { color: ${P.yellow}; min-width: 4.5em; text-align: right; }
-.time { display: flex; gap: 8px; }
-.bottom { position: absolute; left: 14px; right: 14px; bottom: 14px; display: flex; gap: 18px; align-items: flex-end; }
-.weapons { display: flex; gap: 10px; }
-.slot { background: ${P.black}; height: 56px; min-width: 64px; padding: 0 10px; display: grid; place-items: center;
-  box-shadow: ${px(P.slate, 2)}; transition: transform 0.08s steps(2); }
-.slot img { display: block; image-rendering: pixelated; opacity: 0.45; filter: saturate(0.4); }
-.slot.on { background: ${P.navy}; box-shadow: ${px(P.yellow, 3)}, 0 0 0 3px ${P.black}, 0 0 18px 2px rgba(255,236,39,0.35);
-  transform: translateY(-6px) scale(1.08); }
+  background: repeating-linear-gradient(90deg, var(--fill, ${P.lime}) 0 4px, transparent 4px 6px); transition: width 0.15s steps(4); }
+.pct { color: ${P.yellow}; min-width: 4em; text-align: right; }
+.time { display: flex; gap: 6px; font-size: 8px; }
+/* Compact weapon strip, centered at the bottom. */
+.bottom { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.weapons { display: flex; gap: 6px; align-items: flex-end; padding: 5px 6px; background: rgba(0,0,0,0.78); box-shadow: ${px(P.slate, 2)}; }
+.slot { height: 30px; min-width: 40px; padding: 0 5px; display: grid; place-items: center; transition: transform 0.08s steps(2); }
+.slot img { display: block; image-rendering: pixelated; opacity: 0.4; filter: saturate(0.3); }
+.slot.on { background: ${P.navy}; box-shadow: ${px(P.yellow, 2)}; transform: translateY(-3px); }
 .slot.on img { opacity: 1; filter: none; animation: bob 0.5s steps(2) infinite; }
-@keyframes bob { 50% { transform: translateY(-2px); } }
-.slot.nade { min-width: 44px; margin-left: 8px; }
-.slot.nade.ready { box-shadow: ${px(P.lime, 2)}; }
+@keyframes bob { 50% { transform: translateY(-1px); } }
+.slot.nade { min-width: 26px; border-left: 2px solid ${P.slate}; padding-left: 8px; }
 .slot.nade.ready img { opacity: 1; filter: none; }
+.fuel { display: flex; gap: 6px; align-items: center; width: 140px; }
 .fuel img { image-rendering: pixelated; display: block; }
-.fuel { width: 180px; display: flex; gap: 8px; align-items: center; }
+.fuel .bar { height: 5px; }
 .fuel .bar i { --fill: ${P.orange}; transition: none; }
-.hint { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); white-space: nowrap; font-size: 8px;
-  color: ${P.white}; background: rgba(0,0,0,0.8); padding: 8px 12px; box-shadow: ${px(P.lavender, 2)};
+.hint { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); white-space: nowrap; font-size: 7px;
+  color: ${P.white}; background: rgba(0,0,0,0.8); padding: 6px 10px; box-shadow: ${px(P.lavender, 2)};
   transition: opacity 1s; }
 .hint kbd { color: ${P.yellow}; font-family: inherit; }
 .hint.gone { opacity: 0; }
@@ -108,6 +110,10 @@ export class Hud {
   private clock: HTMLElement;
   private fuelFill: HTMLElement;
   private slots: HTMLElement[] = [];
+  private scoreEl: HTMLElement;
+  private livesEl: HTMLElement;
+  private medalUrl: string;
+  private lastScore = -1;
   private nade: HTMLElement;
   private nadeReady = true;
   private hint: HTMLElement;
@@ -123,13 +129,16 @@ export class Hud {
     const hud = el('div', 'hud');
 
     const top = el('div', 'top');
-    const title = el('div', 'panel title');
-    title.append(el('span', 'logo', 'WEB<b>BLASTER</b>'));
-    const hostEl = el('span', 'host');
-    hostEl.textContent = host;
-    title.append(hostEl);
+    const player = el('div', 'player');
+    const scoreRow = el('div');
+    scoreRow.append(el('span', 'p1', '1P'));
+    this.scoreEl = el('span', 'score', '0000000');
+    scoreRow.append(this.scoreEl);
+    this.livesEl = el('div', 'lives');
+    player.append(scoreRow, this.livesEl);
     const meter = el('div', 'panel meter');
-    meter.append(el('span', 'label', 'WRECKED'));
+    meter.title = host;
+    meter.append(el('span', 'label', 'WRECK'));
     const bar = el('div', 'bar');
     this.meterFill = el('i');
     bar.append(this.meterFill);
@@ -138,14 +147,14 @@ export class Hud {
     const time = el('div', 'panel time');
     this.clock = el('span', '', '00:00');
     time.append(el('span', 'label', 'TIME'), this.clock);
-    top.append(title, meter, time);
+    top.append(player, meter, time);
 
     const bottom = el('div', 'bottom');
     const weapons = el('div', 'weapons');
     for (const w of WEAPONS) {
       const s = el('div', 'slot');
       const img = el('img');
-      img.src = iconUrl(WEAPON_ART[w.id].rows, 3);
+      img.src = iconUrl(WEAPON_ART[w.id].rows, 2);
       img.alt = w.id;
       s.append(img);
       this.slots.push(s);
@@ -153,19 +162,20 @@ export class Hud {
     }
     this.nade = el('div', 'slot nade ready');
     const nadeImg = el('img');
-    nadeImg.src = iconUrl(ICONS.grenade, 3);
+    nadeImg.src = iconUrl(ICONS.grenade, 2);
     nadeImg.alt = 'grenade';
     this.nade.append(nadeImg);
     weapons.append(this.nade);
-    const fuel = el('div', 'panel fuel');
+    const fuel = el('div', 'fuel');
     const fbar = el('div', 'bar');
     this.fuelFill = el('i');
     fbar.append(this.fuelFill);
     const flame = el('img');
-    flame.src = iconUrl(ICONS.flame, 3);
-    flame.alt = 'jetpack';
+    flame.src = iconUrl(ICONS.flame, 2);
+    flame.alt = 'jet';
     fuel.append(flame, fbar);
     bottom.append(weapons, fuel);
+    this.medalUrl = iconUrl(ICONS.medal, 2);
 
     this.hint = el(
       'div',
@@ -201,6 +211,23 @@ export class Hud {
 
   setWeapon(i: number): void {
     this.slots.forEach((s, j) => s.classList.toggle('on', i === j));
+  }
+
+  setScore(score: number): void {
+    if (score === this.lastScore) return;
+    this.lastScore = score;
+    this.scoreEl.textContent = String(Math.min(9999999, score)).padStart(7, '0');
+  }
+
+  setLives(n: number): void {
+    this.livesEl.replaceChildren(
+      ...Array.from({ length: Math.max(0, n) }, () => {
+        const img = el('img');
+        img.src = this.medalUrl;
+        img.alt = 'life';
+        return img;
+      }),
+    );
   }
 
   setGrenadeReady(ready: boolean): void {

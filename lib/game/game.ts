@@ -5,6 +5,7 @@ import { Sfx } from './audio';
 import { HUD_CSS, Hud, type MenuAction, type MenuItem } from './hud';
 import { BEDROCK_ROWS, CELL, Level, type DebrisSink } from './level';
 import { Kind, Particles } from './particles';
+import { EH, EW, Enemies, type Enemy } from './enemies';
 import { SPRITE_H, SPRITE_W, Sprites, WEAPON_ART, brickTile, voidTile, type Pose } from './sprites';
 import { GRENADE, WEAPONS, type ShotKind } from './weapons';
 
@@ -20,13 +21,15 @@ const GRAVITY = 620;
 const MAX_FALL = 420;
 const JUMP = 255;
 const FLIP_JUMP = 230;
-const FLIP_TIME = 0.4;
 const JET_ACCEL = 1350;
 const JET_MAX_UP = 210;
 const FUEL_MAX = 1.6;
 const FLY_DELAY = 0.16;
 const STEP_UP = 6;
 const WIN_AT = 0.85;
+const LIVES = 3;
+const INVULN = 2.5;
+const KILL_SCORE = { runner: 500, sniper: 1500 };
 
 const MILESTONES: [number, string, string][] = [
   [0.25, '25% WRECKED', 'KEEP BLASTING'],
@@ -48,8 +51,10 @@ interface Projectile {
 }
 
 export interface GameHooks {
+  /** Stage number shown on the intro banner. */
+  stage: number;
   onQuit(): void;
-  onStats(delta: { won: boolean; shots: number; pixels: number }): void;
+  onStats(delta: { won: boolean; shots: number; pixels: number; hiScore: number }): void;
   onSettings(s: Settings): void;
 }
 
@@ -84,8 +89,9 @@ export class Game {
   private facing = 1;
   private fuel = FUEL_MAX;
   private airJump = true;
-  private flipT = 0;
-  private flipDir = 1;
+  /** Somersaulting through the air, run-and-gun style. */
+  private balled = false;
+  private spin = 0;
   private dropT = 0;
   private phasing = false;
   private coyote = 0;
@@ -109,6 +115,20 @@ export class Game {
   private shots: Projectile[] = [];
   /** Expanding shockwave outlines. */
   private rings: { x: number; y: number; r: number; max: number; life: number; color: string }[] = [];
+  /** NES-style explosion animations. */
+  private booms: { x: number; y: number; scale: number; t: number }[] = [];
+  /** Floating score numbers. */
+  private popups: { x: number; y: number; text: string; t: number; color: string }[] = [];
+  private muzzleT = 0;
+  private readonly stars = Array.from({ length: 160 }, () => ({ x: Math.random(), y: Math.random(), z: 0.15 + Math.random() * 0.5, tw: Math.random() * 6 }));
+
+  private readonly enemies: Enemies;
+  private lives = LIVES;
+  private dead = false;
+  private deathT = 0;
+  private invuln = 0;
+  private killScore = 0;
+  private gameOver = false;
 
   private time = 0;
   private nextMilestone = 0;
@@ -149,6 +169,11 @@ export class Game {
     this.brick = this.ctx.createPattern(brickTile(CELL), 'repeat')!;
     this.voidPat = this.ctx.createPattern(voidTile(), 'repeat')!;
     this.sfx = new Sfx(settings.sound);
+    this.enemies = new Enemies({
+      shoot: () => this.sfx.enemyShot(),
+      spawn: (e) => this.parts.burst(e.x + EW / 2, e.y + EH / 2, 16, Kind.Spark, [P.red, P.white], 90, 0.4),
+      shotBlocked: (x, y) => this.parts.burst(x, y, 3, Kind.Spark, [P.red, P.white], 60, 0.15),
+    });
     this.debris = (x, y, color) => {
       const life = rand(0.7, 1.6);
       this.parts.add({ x, y, vx: rand(-90, 90), vy: rand(-200, -20), life, max: life, color, size: 1, kind: Kind.Debris });
@@ -159,7 +184,7 @@ export class Game {
     this.resize();
     this.reset();
     this.camY = cap.viewTop;
-    this.hud.showBanner('BLAST IT!', 'DESTROY THIS PAGE');
+    this.hud.showBanner(`STAGE ${hooks.stage}`, cap.host.toUpperCase());
     if (this.level.total < 100) this.hud.toast('NOT MUCH TO HIT HERE. TRY GRENADES!', 4000);
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
@@ -182,19 +207,29 @@ export class Game {
     this.shots = [];
     this.parts.list = [];
     this.rings = [];
+    this.booms = [];
+    this.popups = [];
+    this.enemies.clear();
+    this.lives = LIVES;
+    this.dead = false;
+    this.gameOver = false;
+    this.invuln = INVULN;
+    this.killScore = 0;
+    this.balled = false;
     this.time = 0;
     this.nextMilestone = 0;
     this.won = false;
     this.fuel = FUEL_MAX;
     this.hud.setProgress(0);
     this.hud.setWeapon(this.weapon);
+    this.hud.setLives(this.lives);
     this.spawn();
   }
 
-  private spawn(): void {
+  private spawn(viewTop = this.cap.viewTop): void {
     const L = this.level;
     const x = clamp(Math.floor(L.w / 2 - PW / 2), 0, L.w - PW);
-    const y0 = Math.floor(this.cap.viewTop / CELL) + 10;
+    const y0 = Math.floor(viewTop / CELL) + 10;
     let spot: [number, number] | null = null;
     search: for (let d = 0; d < 160; d += 2) {
       for (const dx of [0, -30, 30, -60, 60]) {
@@ -273,7 +308,7 @@ export class Game {
     e.stopImmediatePropagation();
     this.sfx.resume();
     if (this.hud.menuOpen) {
-      if (e.code === 'Escape' && !this.won) this.resume();
+      if (e.code === 'Escape' && !this.won && !this.gameOver) this.resume();
       else if (!e.repeat) this.hud.menuKey(e.code, this.menuItems);
       return;
     }
@@ -347,6 +382,7 @@ export class Game {
       { act: 'restart', label: 'RESTART' },
       { act: 'sound', label: this.soundLabel() },
       { act: 'crt', label: this.crtLabel() },
+      { act: 'enemies', label: this.enemiesLabel() },
       { act: 'quit', label: 'QUIT' },
     ];
     this.hud.openMenu('PAUSED', this.menuItems, undefined, 'ESC RESUME &middot; M MUTE');
@@ -378,6 +414,7 @@ export class Game {
       [
         ['WRECKED', `${Math.floor(this.level.destroyed * 100)}%`],
         ['TIME', `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`],
+        ['SCORE', this.score().toLocaleString()],
         ['SHOTS', this.shotsFired.toLocaleString()],
         ['PIXELS', (this.cellsBlasted * CELL * CELL).toLocaleString()],
       ],
@@ -409,10 +446,48 @@ export class Game {
         this.hud.relabel('crt', this.crtLabel(), this.menuItems);
         this.hooks.onSettings(this.settings);
         break;
+      case 'enemies':
+        this.settings = { ...this.settings, enemies: !this.settings.enemies };
+        if (!this.settings.enemies) this.enemies.clear();
+        this.hud.relabel('enemies', this.enemiesLabel(), this.menuItems);
+        this.hooks.onSettings(this.settings);
+        break;
+      case 'continue':
+        this.reportStats();
+        this.gameOver = false;
+        this.lives = LIVES;
+        this.killScore = 0;
+        this.hud.setLives(this.lives);
+        this.respawn();
+        this.resume();
+        break;
       case 'quit':
         this.quit();
         break;
     }
+  }
+
+  private openGameOver(): void {
+    this.paused = true;
+    this.gameOver = true;
+    this.keys.clear();
+    this.fireHeld = false;
+    this.sfx.jet(false);
+    this.sfx.laser(false);
+    this.reportStats();
+    this.menuItems = [
+      { act: 'continue', label: 'CONTINUE' },
+      { act: 'restart', label: 'RESTART PAGE' },
+      { act: 'quit', label: 'QUIT' },
+    ];
+    this.hud.openMenu('GAME OVER', this.menuItems, [
+      ['SCORE', this.score().toLocaleString()],
+      ['WRECKED', `${Math.floor(this.level.destroyed * 100)}%`],
+    ]);
+  }
+
+  private score(): number {
+    return this.killScore + this.cellsBlasted;
   }
 
   private toggleSound(): void {
@@ -423,12 +498,13 @@ export class Game {
 
   private soundLabel = () => `SOUND: ${this.settings.sound ? 'ON' : 'OFF'}`;
   private crtLabel = () => `CRT FX: ${this.settings.crt ? 'ON' : 'OFF'}`;
+  private enemiesLabel = () => `ENEMIES: ${this.settings.enemies ? 'ON' : 'OFF'}`;
 
   private reportStats(won = false): void {
     const shots = this.shotsFired - this.reported.shots;
     const cells = this.cellsBlasted - this.reported.cells;
     this.reported = { shots: this.shotsFired, cells: this.cellsBlasted };
-    if (shots || cells || won) this.hooks.onStats({ won, shots, pixels: cells * CELL * CELL });
+    if (shots || cells || won) this.hooks.onStats({ won, shots, pixels: cells * CELL * CELL, hiScore: this.score() });
   }
 
   // ---- loop ----
@@ -456,6 +532,8 @@ export class Game {
         cx: this.camX,
         cy: this.camY,
         p: this.level.destroyed,
+        dead: this.dead,
+        enemies: this.enemies.list.length,
       });
     }
   };
@@ -464,10 +542,23 @@ export class Game {
     this.time += dt;
     this.cooldown -= dt;
     this.nadeCooldown -= dt;
-    this.updatePlayer(dt);
-    this.updateWeapons(dt);
+    this.muzzleT -= dt;
+    this.invuln = Math.max(0, this.invuln - dt);
+    if (this.dead) this.updateDeath(dt);
+    else {
+      this.updatePlayer(dt);
+      this.updateWeapons(dt);
+    }
     this.updateShots(dt);
+    this.updateEnemies(dt);
     this.parts.update(dt, this.level);
+    for (const b of this.booms) b.t += dt;
+    this.booms = this.booms.filter((b) => b.t < 0.42);
+    for (const pp of this.popups) {
+      pp.t += dt;
+      pp.y -= dt * 18;
+    }
+    this.popups = this.popups.filter((pp) => pp.t < 0.9);
     for (const g of this.rings) {
       g.r += (g.max - g.r) * Math.min(1, dt * 12);
       g.life -= dt;
@@ -480,6 +571,7 @@ export class Game {
     const p = this.level.destroyed;
     this.hud.setProgress(p);
     this.hud.setTime(this.time);
+    this.hud.setScore(this.score());
     this.hud.setGrenadeReady(this.nadeCooldown <= 0);
     const fuel = Math.round((this.fuel / FUEL_MAX) * 50);
     if (fuel !== this.lastFuel) {
@@ -526,32 +618,34 @@ export class Game {
         this.jumpBuf = this.coyote = 0;
         this.grounded = false;
         this.airJump = true;
+        this.balled = true;
         this.sfx.jump();
         this.parts.burst(this.px + PW / 2, this.py + PH, 6, Kind.Smoke, SMOKE, 40, 0.4, 1);
       } else if (this.airJump) {
         this.vy = -FLIP_JUMP;
         this.airJump = false;
         this.jumpBuf = 0;
-        this.flipT = FLIP_TIME;
-        this.flipDir = this.facing;
+        this.balled = true;
         this.sfx.flip();
       }
     }
 
     this.flying = jumpKey && !this.grounded && this.jumpHeld > FLY_DELAY && this.fuel > 0 && this.dropT <= 0;
     if (this.flying) {
+      this.balled = false;
       this.vy = Math.max(-JET_MAX_UP, this.vy - JET_ACCEL * dt);
       this.fuel = Math.max(0, this.fuel - dt);
-      if (Math.random() < 0.7) {
-        const jx = this.facing > 0 ? this.px - 1 : this.px + PW;
-        const life = rand(0.15, 0.35);
-        this.parts.add({ x: jx + rand(0, 2), y: this.py + 16, vx: rand(-20, 20), vy: rand(100, 200), life, max: life, color: FIRE[(Math.random() * 4) | 0], size: 2, kind: Kind.Fire });
+      // Rocket boots.
+      for (const fx of [this.px + 2, this.px + PW - 3]) {
+        if (Math.random() > 0.5) continue;
+        const life = rand(0.12, 0.3);
+        this.parts.add({ x: fx + rand(0, 1.5), y: this.py + PH, vx: rand(-15, 15), vy: rand(120, 220), life, max: life, color: FIRE[(Math.random() * 4) | 0], size: 2, kind: Kind.Fire });
       }
     }
     this.sfx.jet(this.flying);
     this.vy = Math.min(MAX_FALL, this.vy + GRAVITY * dt);
     if (this.grounded) this.fuel = Math.min(FUEL_MAX, this.fuel + dt * 1.5);
-    this.flipT = Math.max(0, this.flipT - dt);
+    this.spin += dt;
     this.dropT -= dt;
 
     this.phasing = this.dropT > 0 || (this.phasing && L.boxHits(this.px, this.py, PW, PH));
@@ -560,10 +654,81 @@ export class Game {
 
     const was = this.grounded;
     this.grounded = !this.phasing && this.vy >= 0 && L.boxHits(this.px, this.py + 1, PW, PH);
+    if (this.grounded) this.balled = false;
     if (this.grounded && !was) this.parts.burst(this.px + PW / 2, this.py + PH, 4, Kind.Smoke, SMOKE, 30, 0.3, 1);
 
     if (!this.phasing && L.boxHits(this.px, this.py, PW, PH)) this.unstick();
     if (Math.abs(this.vx) > 10) this.runT += dt;
+  }
+
+  private die(): void {
+    if (this.dead || this.invuln > 0) return;
+    this.dead = true;
+    this.deathT = 1.4;
+    this.lives--;
+    this.hud.setLives(this.lives);
+    this.vx = -this.facing * 110;
+    this.vy = -230;
+    this.balled = true;
+    this.fireHeld = false;
+    this.sfx.jet(false);
+    this.sfx.laser(false);
+    this.sfx.playerDie();
+    this.shake = Math.max(this.shake, 10);
+    this.flash = Math.max(this.flash, 0.25);
+    this.parts.burst(this.px + PW / 2, this.py + PH / 2, 30, Kind.Spark, [P.red, P.peach, P.white], 160, 0.6);
+  }
+
+  /** Knocked back and tumbling, then back in action (or game over). */
+  private updateDeath(dt: number): void {
+    this.deathT -= dt;
+    this.spin += dt;
+    this.vy = Math.min(MAX_FALL, this.vy + GRAVITY * dt);
+    this.vx *= 0.98;
+    this.moveX(this.vx * dt);
+    this.moveY(this.vy * dt);
+    if (this.deathT > 0) return;
+    if (this.lives <= 0) this.openGameOver();
+    else this.respawn();
+  }
+
+  private respawn(): void {
+    this.dead = false;
+    this.balled = false;
+    this.invuln = INVULN;
+    this.fuel = FUEL_MAX;
+    this.spawn(this.camY);
+    this.sfx.respawn();
+  }
+
+  private updateEnemies(dt: number): void {
+    if (!this.settings.enemies) return;
+    const view = { x0: this.camX / CELL, y0: this.camY / CELL, x1: (this.camX + this.vw) / CELL, y1: (this.camY + this.vh) / CELL };
+    const heat = Math.min(1, this.level.destroyed * 1.4 + this.time / 240);
+    this.enemies.update(dt, { level: this.level, target: this.dead ? null : { x: this.px + PW / 2, y: this.py + PH / 2 }, view, heat });
+    if (this.dead || this.invuln > 0) {
+      this.enemies.hits(-1e9, -1e9, 0, 0);
+      return;
+    }
+    // Shots or body contact are both fatal, as in the arcade.
+    const hb = { x: this.px + 2, y: this.py + 3, w: PW - 4, h: PH - 4 };
+    const touched = this.enemies.list.some((e) => e.x < hb.x + hb.w && e.x + EW > hb.x && e.y < hb.y + hb.h && e.y + EH > hb.y);
+    if (this.enemies.hits(hb.x, hb.y, hb.w, hb.h) || touched) this.die();
+  }
+
+  private damage(e: Enemy, amount: number): void {
+    e.hp -= amount;
+    e.hitT = 0.08;
+    if (e.hp > 0) return;
+    const cx = e.x + EW / 2;
+    const cy = e.y + EH / 2;
+    const points = KILL_SCORE[e.kind];
+    this.killScore += points;
+    this.booms.push({ x: cx, y: cy, scale: e.kind === 'sniper' ? 1.6 : 1.2, t: 0 });
+    this.popups.push({ x: cx, y: e.y, text: String(points), t: 0, color: e.kind === 'sniper' ? P.yellow : P.white });
+    this.parts.burst(cx, cy, 26, Kind.Debris, [P.slate, P.lavender, P.peach, P.red], 140, 1.2);
+    this.shake = Math.max(this.shake, 4);
+    this.sfx.enemyDie();
   }
 
   private moveX(dx: number): void {
@@ -644,13 +809,22 @@ export class Game {
     const w = WEAPONS[this.weapon];
     const { ox, oy, dx, dy } = this.aim();
     if (Math.abs(dx) > 0.05) this.facing = dx > 0 ? 1 : -1;
-    const { x: mx, y: my } = this.muzzle(ox, oy, dx, dy);
+    const { x: mx, y: my } = this.balled ? { x: this.px + PW / 2 + dx * 9, y: this.py + PH / 2 + dy * 9 } : this.muzzle(ox, oy, dx, dy);
 
     this.beam = null;
     if ((this.fireHeld || this.fireQueued > 0) && w.kind === 'laser') {
       this.fireQueued -= dt;
       const hit = this.level.raycast(mx, my, dx, dy, 700);
       const end = hit ?? { x: mx + dx * 700, y: my + dy * 700 };
+      if (this.laserTick - dt <= 0) {
+        const len = Math.hypot(end.x - mx, end.y - my);
+        const struck = new Set<Enemy>();
+        for (let d = 0; d < len; d += 2) {
+          const e = this.enemies.at(mx + dx * d, my + dy * d);
+          if (e) struck.add(e);
+        }
+        for (const e of struck) this.damage(e, 1);
+      }
       this.beam = { x0: mx, y0: my, x1: end.x, y1: end.y };
       this.laserTick -= dt;
       if (hit && this.laserTick <= 0) {
@@ -668,11 +842,12 @@ export class Game {
         this.fireQueued = 0;
         const base = Math.atan2(dy, dx);
         for (let i = 0; i < w.pellets; i++) {
-          const a = base + rand(-w.spread, w.spread);
+          const a = base + (w.fan && w.pellets > 1 ? -w.spread + (2 * w.spread * i) / (w.pellets - 1) : rand(-w.spread, w.spread));
           const v = w.speed * rand(0.9, 1.1);
           this.shots.push({ x: mx, y: my, px: mx, py: my, vx: Math.cos(a) * v, vy: Math.sin(a) * v, kind: w.kind, life: w.life, radius: w.radius, color: w.color });
         }
         this.shotsFired++;
+        this.muzzleT = 0.05;
         this.vx -= dx * w.recoil;
         if (!this.grounded) this.vy -= dy * w.recoil * 0.8;
         this.shake = Math.max(this.shake, w.shake);
@@ -716,6 +891,16 @@ export class Game {
       for (let i = 0; i < steps; i++) {
         const nx = s.x + (s.vx * dt) / steps;
         const ny = s.y + (s.vy * dt) / steps;
+        const foe = s.kind === 'grenade' ? null : this.enemies.at(nx, ny);
+        if (foe) {
+          if (s.kind === 'rocket') this.explode(nx, ny, s.radius);
+          else {
+            this.damage(foe, 1);
+            this.parts.burst(nx, ny, 5, Kind.Spark, [P.white, P.red], 100, 0.2);
+          }
+          dead = true;
+          break;
+        }
         if (!L.solidAt(Math.floor(nx), Math.floor(ny))) {
           s.x = nx;
           s.y = ny;
@@ -760,6 +945,7 @@ export class Game {
       // A whole image or card just gave way.
       const size = Math.min(60, Math.sqrt(c.cells) / 2);
       this.rings.push({ x: c.x, y: c.y, r: size * 0.3, max: size * 2.2, life: 0.5, color: P.peach });
+      this.booms.push({ x: c.x, y: c.y, scale: size / 8, t: 0 });
       this.parts.burst(c.x, c.y, 30, Kind.Smoke, SMOKE, size * 4, 1.6, 4);
       this.shake = Math.max(this.shake, 14);
       this.flash = Math.max(this.flash, 0.2);
@@ -785,7 +971,9 @@ export class Game {
     this.shake = Math.max(this.shake, Math.min(18, r * 0.7));
     this.flash = Math.max(this.flash, Math.min(0.35, r / 60));
     this.rings.push({ x, y, r: r * 0.4, max: r * 2.6, life: 0.35, color: P.white }, { x, y, r: r * 0.2, max: r * 1.7, life: 0.45, color: P.yellow });
+    this.booms.push({ x, y, scale: r / 9, t: 0 });
     this.sfx.boom(r);
+    for (const e of this.enemies.within(x, y, r * 1.2)) this.damage(e, 3);
 
     const cx = this.px + PW / 2;
     const cy = this.py + PH / 2;
@@ -834,6 +1022,15 @@ export class Game {
     this.voidPat.setTransform(new DOMMatrix().translate(-camX * 0.5, -camY * 0.5));
     ctx.fillStyle = this.voidPat;
     ctx.fillRect(-20, -20, vw + 40, vh + 40);
+    // Parallax starfield, visible through every hole blasted in the page.
+    for (const st of this.stars) {
+      const x = (((st.x * vw - camX * st.z) % vw) + vw) % vw;
+      const y = (((st.y * vh * 2 - camY * st.z) % vh) + vh) % vh;
+      const tw = Math.sin(this.time * 3 + st.tw) > 0.6;
+      ctx.fillStyle = st.z > 0.5 ? P.white : tw ? P.pink : P.lavender;
+      const size = st.z > 0.55 ? 2 : 1;
+      ctx.fillRect(Math.round(x), Math.round(y), size * CELL * 0.5 + 1, size * CELL * 0.5 + 1);
+    }
 
     const s = L.scale;
     const visW = Math.min(vw, L.cssW - camX);
@@ -852,10 +1049,27 @@ export class Game {
       ctx.fillRect(-camX, bedTop, L.w * CELL, BEDROCK_ROWS * CELL + vh);
     }
 
+    if (this.settings.enemies) this.enemies.draw(ctx, this.sprites, CELL, camX, camY, this.time);
     for (const shot of this.shots) this.drawShot(shot, camX, camY);
     if (this.beam) this.drawBeam(camX, camY);
     this.drawPlayer(camX, camY);
     this.parts.draw(ctx, CELL, camX, camY, vw, vh);
+    for (const b of this.booms) {
+      const img = this.sprites.boom[Math.min(5, Math.floor(b.t / 0.07))];
+      const size = img.width * CELL * b.scale;
+      ctx.drawImage(img, Math.round(b.x * CELL - camX - size / 2), Math.round(b.y * CELL - camY - size / 2), size, size);
+    }
+    ctx.font = '10px WBPixel, monospace';
+    ctx.textAlign = 'center';
+    for (const pp of this.popups) {
+      if (pp.t > 0.6 && Math.floor(pp.t * 20) % 2) continue;
+      const x = Math.round(pp.x * CELL - camX);
+      const y = Math.round(pp.y * CELL - camY);
+      ctx.fillStyle = P.black;
+      ctx.fillText(pp.text, x + 2, y + 2);
+      ctx.fillStyle = pp.color;
+      ctx.fillText(pp.text, x, y);
+    }
     for (const g of this.rings) {
       ctx.globalAlpha = Math.min(1, g.life * 4);
       ctx.strokeStyle = g.color;
@@ -879,14 +1093,15 @@ export class Game {
     const x = Math.floor(s.x) * CELL - camX;
     const y = Math.floor(s.y) * CELL - camY;
     if (s.kind === 'bullet') {
-      ctx.strokeStyle = s.color;
-      ctx.lineWidth = CELL;
-      ctx.beginPath();
-      ctx.moveTo(s.px * CELL - camX, s.py * CELL - camY);
-      ctx.lineTo(s.x * CELL - camX, s.y * CELL - camY);
-      ctx.stroke();
-      ctx.fillStyle = P.white;
-      ctx.fillRect(x, y, CELL, CELL);
+      // Round run-and-gun pellets: white dots, or fat red balls for the spread gun.
+      const big = s.color === P.red;
+      const r = (big ? 3 : 1.5) * CELL;
+      ctx.fillStyle = big ? P.plum : P.slate;
+      ctx.fillRect(Math.round(s.px * CELL - camX) - r / 2, Math.round(s.py * CELL - camY) - r / 2, r, r);
+      ctx.fillStyle = big ? P.red : P.white;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      ctx.fillStyle = big ? P.white : P.yellow;
+      ctx.fillRect(x - r / 2, y - r / 2, r, r);
     } else {
       const img = s.kind === 'rocket' ? this.sprites.rocket : this.sprites.grenade;
       ctx.save();
@@ -920,31 +1135,41 @@ export class Game {
 
   private drawPlayer(camX: number, camY: number): void {
     const ctx = this.ctx;
-    const pose: Pose = !this.grounded ? 'air' : Math.abs(this.vx) > 10 ? (Math.floor(this.runT * 10) % 2 ? 'run1' : 'run2') : 'stand';
+    // Blink while invulnerable after a respawn.
+    if (this.invuln > 0 && !this.dead && Math.floor(this.invuln * 16) % 2) return;
+    if (this.dead && this.deathT < 0.5 && Math.floor(this.deathT * 20) % 2) return;
+
+    if (this.balled || this.dead) {
+      // Somersault: the curled-up commando spins in 90 degree steps.
+      const img = this.sprites.ball;
+      const cx = Math.round((this.px + PW / 2) * CELL - camX);
+      const cy = Math.round((this.py + PH / 2) * CELL - camY);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(Math.floor(this.spin * 14) * (Math.PI / 2) * this.facing);
+      ctx.drawImage(img, (-img.width * CELL) / 2, (-img.height * CELL) / 2, img.width * CELL, img.height * CELL);
+      ctx.restore();
+      return;
+    }
+
+    const runCycle: Pose[] = ['run1', 'run2', 'run3', 'run2'];
+    const pose: Pose = !this.grounded ? 'air' : Math.abs(this.vx) > 10 ? runCycle[Math.floor(this.runT * 11) % 4] : 'stand';
     const sprite = this.sprites.hero[pose][this.facing > 0 ? 'right' : 'left'];
     const x = Math.round((this.px - 3) * CELL - camX);
     const y = Math.round((this.py - 1) * CELL - camY);
     const w = SPRITE_W * CELL;
     const h = SPRITE_H * CELL;
-
-    ctx.save();
-    if (this.flipT > 0) {
-      const a = (1 - this.flipT / FLIP_TIME) * Math.PI * 2 * this.flipDir;
-      ctx.translate(x + w / 2, y + h / 2);
-      ctx.rotate(Math.round(a / (Math.PI / 4)) * (Math.PI / 4));
-      ctx.translate(-(x + w / 2), -(y + h / 2));
-    }
     ctx.drawImage(sprite, x, y, w, h);
     if (this.flying) {
-      const fx = this.facing > 0 ? x + CELL * 2 : x + w - CELL * 5;
-      const n = 3 + Math.floor(Math.random() * 4);
-      for (let i = 0; i < n; i++) {
-        ctx.fillStyle = FIRE[Math.min(FIRE.length - 1, i)];
-        const fw = Math.max(1, 3 - (i >> 1)) * CELL;
-        ctx.fillRect(fx + (CELL * 3 - fw) / 2, y + CELL * 17 + i * CELL, fw, CELL);
+      // Rocket boot flames.
+      for (const bx of [x + CELL * 4, x + CELL * 10]) {
+        const n = 2 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < n; i++) {
+          ctx.fillStyle = FIRE[Math.min(FIRE.length - 1, i + 1)];
+          ctx.fillRect(bx + (i ? CELL * 0.5 : 0), y + h + i * CELL, CELL * (i ? 2 : 3), CELL);
+        }
       }
     }
-    ctx.restore();
 
     // The held weapon, rotated to the aim. Flipped when aiming left so it never hangs upside down.
     const { ox, oy, dx, dy } = this.aim();
@@ -958,6 +1183,16 @@ export class Game {
     ctx.translate(Math.round(ox * CELL - camX), Math.round(oy * CELL - camY));
     ctx.rotate(Math.atan2(dy, dx));
     ctx.drawImage(img, (-art.pivot[0] - kick) * CELL, -pivotY * CELL, img.width * CELL, img.height * CELL);
+    if (this.muzzleT > 0) {
+      // Muzzle flash: a chunky four-point star at the barrel.
+      const mx = (art.muzzle[0] - art.pivot[0] + 1) * CELL;
+      const my = ((left ? img.height - 1 - art.muzzle[1] : art.muzzle[1]) - pivotY) * CELL;
+      ctx.fillStyle = P.yellow;
+      ctx.fillRect(mx - CELL, my - CELL * 3, CELL * 2, CELL * 6);
+      ctx.fillRect(mx - CELL * 3, my - CELL, CELL * 6, CELL * 2);
+      ctx.fillStyle = P.white;
+      ctx.fillRect(mx - CELL, my - CELL, CELL * 2, CELL * 2);
+    }
     ctx.restore();
   }
 

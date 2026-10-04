@@ -1,6 +1,6 @@
 import { blastTab } from '@/lib/inject';
 import { P } from '@/lib/palette';
-import { settingsItem, statsItem, type Settings } from '@/lib/settings';
+import { loadSettings, settingsItem, statsItem, type Settings } from '@/lib/settings';
 import { Sprites } from '@/lib/game/sprites';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -11,13 +11,14 @@ const MAX_SCREENS = 8;
 let settings: Settings;
 
 async function init(): Promise<void> {
-  settings = await settingsItem.getValue();
+  settings = await loadSettings();
   renderSettings();
 
   const stats = await statsItem.getValue();
   $('pages').textContent = stats.pagesDestroyed.toLocaleString();
   $('shots').textContent = stats.shotsFired.toLocaleString();
   $('pixels').textContent = compact(stats.pixelsBlasted);
+  $('hiscore').textContent = String(stats.hiScore ?? 0).padStart(7, '0');
 
   const commands = await browser.commands.getAll();
   const shortcut = commands.find((c) => c.name === 'destroy-page')?.shortcut;
@@ -26,6 +27,8 @@ async function init(): Promise<void> {
   $('blast').addEventListener('click', blast);
   $('sound').addEventListener('click', () => save({ sound: !settings.sound }));
   $('crt').addEventListener('click', () => save({ crt: !settings.crt }));
+  $('enemies').addEventListener('click', () => save({ enemies: !settings.enemies }));
+  $('xsidekick').addEventListener('click', () => save({ xSidekick: !settings.xSidekick }));
   $('less').addEventListener('click', () => save({ maxScreens: Math.max(MIN_SCREENS, settings.maxScreens - 1) }));
   $('more').addEventListener('click', () => save({ maxScreens: Math.min(MAX_SCREENS, settings.maxScreens + 1) }));
   $('blast').focus();
@@ -59,6 +62,8 @@ function renderSettings(): void {
   };
   toggle('sound', settings.sound);
   toggle('crt', settings.crt);
+  toggle('enemies', settings.enemies);
+  toggle('xsidekick', settings.xSidekick);
   $('screens').textContent = `${settings.maxScreens} SCREEN${settings.maxScreens === 1 ? '' : 'S'}`;
 }
 
@@ -83,7 +88,7 @@ function animateHero(): void {
   const canvas = $<HTMLCanvasElement>('hero');
   const ctx = canvas.getContext('2d')!;
   const sprites = new Sprites();
-  const gun = sprites.weapons.smg.up;
+  const gun = sprites.weapons.machine.up;
   const bricks = Array.from({ length: W / 4 }, () => true);
   const sparks: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
   let x = -16;

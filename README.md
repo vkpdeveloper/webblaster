@@ -19,8 +19,17 @@ Load manually: `chrome://extensions` → Developer mode → Load unpacked → `.
 
 Start with the toolbar popup, `Alt+Shift+D`, or right-click → **Blast this page**. Trigger again to exit.
 
-`A`/`D` run · `Space` jump, tap again to flip, hold to fly · `S` drop · click shoot · right-click / `G` grenade ·
-`1-5` / wheel / `Q` `E` weapons · `Esc` pause · `M` mute
+`A`/`D` run · `Space` jump (somersault), tap again in the air for a second jump, hold to fly on rocket boots ·
+`S` drop · click shoot · right-click / `G` grenade · `1-5` / wheel / `Q` `E` weapons · `Esc` pause · `M` mute
+
+Arcade run-and-gun rules: you have three lives, enemy soldiers storm the page (runners from the edges and
+paratroopers from above, snipers on page elements), and one hit costs a life. Weapons are rifle, machine gun,
+spread gun, rocket launcher and laser. Enemies can be switched off in the popup or the pause menu.
+
+### x.com sidekick
+
+On x.com the commando waits at the bottom of the screen. Click **Like**, **Repost** or **Post** and he flies over,
+shoots the button, and then your click goes through. Toggle it with **X.COM SIDEKICK** in the popup.
 
 ## How it works
 
@@ -31,10 +40,12 @@ Start with the toolbar popup, `Alt+Shift+D`, or right-click → **Blast this pag
 3. **Level** (`lib/game/level.ts`): a 2px cell grid. Words are solid only where the screenshot has ink. Each cell
    remembers its element; once an element loses enough cells, the rest crumbles. Craters are erased from the
    picture with `destination-out`, revealing the void.
-4. **Game** (`lib/game/game.ts`): fixed-step physics, five weapons plus grenades, particles, and a canvas overlay in a
-   closed shadow root. Sound effects are synthesized (`lib/game/audio.ts`).
+4. **Game** (`lib/game/game.ts`): fixed-step physics, five weapons plus grenades, enemies (`lib/game/enemies.ts`),
+   particles, and a canvas overlay in a closed shadow root. Sound effects are synthesized (`lib/game/audio.ts`).
+5. **Sidekick** (`lib/sidekick.ts`, `entrypoints/x.content.ts`): holds trusted clicks on x.com's like, repost and post
+   buttons, plays the shot, then replays the click.
 
-Permissions: `activeTab`, `scripting`, `storage`, `contextMenus`. There are no host permissions and no server; nothing
-leaves the browser.
+Permissions: `activeTab`, `scripting`, `storage`, `contextMenus`, plus a content script on x.com / twitter.com for the
+sidekick. There is no server; nothing leaves the browser.
 
 Font: Press Start 2P (SIL OFL, `public/fonts/OFL.txt`). Palette: PICO-8.
