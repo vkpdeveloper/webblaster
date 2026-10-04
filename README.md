@@ -2,6 +2,17 @@
 
 Chrome extension (WXT, MV3) that turns the page you're on into a destructible retro pixel-art level.
 
+## Install
+
+Download the latest build from [Releases](https://github.com/vkpdeveloper/webblaster/releases/latest):
+
+1. Download `webblaster-<version>-chrome.zip` and unzip it.
+2. Open `chrome://extensions` and switch on **Developer mode** (top right).
+3. Click **Load unpacked** and pick the unzipped folder.
+
+A signed `.crx` is attached too. Chrome on Windows and macOS only installs `.crx` files from the Chrome Web Store
+(or through enterprise policy), so the zip is the easiest way to install it yourself.
+
 ## Develop
 
 ```sh
