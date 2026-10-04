@@ -534,6 +534,10 @@ export class Game {
         p: this.level.destroyed,
         dead: this.dead,
         enemies: this.enemies.list.length,
+        foes: this.enemies.list.map((e) => [(e.x + EW / 2) * CELL - this.camX, (e.y + EH / 2) * CELL - this.camY]),
+        score: this.score(),
+        lives: this.lives,
+        paused: this.paused,
       });
     }
   };
