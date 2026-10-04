@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Web Blaster</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="cabinet">
+      <header class="marquee">
+        <canvas id="hero" width="96" height="32" aria-hidden="true"></canvas>
+        <h1>WEB<b>BLASTER</b></h1>
+        <p class="tagline">TURN ANY PAGE INTO A LEVEL</p>
+      </header>
+
+      <section class="screen">
+        <button id="blast" class="big" type="button">&gt; BLAST THIS PAGE</button>
+        <p class="coin">INSERT COIN</p>
+        <p id="err" class="err" hidden></p>
+      </section>
+
+      <section class="window">
+        <h2>OPTIONS</h2>
+        <div class="row">
+          <span>SOUND</span>
+          <button id="sound" class="toggle" type="button"></button>
+        </div>
+        <div class="row">
+          <span>CRT FX</span>
+          <button id="crt" class="toggle" type="button"></button>
+        </div>
+        <div class="row">
+          <span>LEVEL</span>
+          <span class="stepper">
+            <button id="less" type="button" aria-label="Fewer screens">-</button>
+            <output id="screens"></output>
+            <button id="more" type="button" aria-label="More screens">+</button>
+          </span>
+        </div>
+      </section>
+
+      <section class="window">
+        <h2>HI-SCORES</h2>
+        <div class="row"><span>PAGES DESTROYED</span><b id="pages">0</b></div>
+        <div class="row"><span>SHOTS FIRED</span><b id="shots">0</b></div>
+        <div class="row"><span>PIXELS BLASTED</span><b id="pixels">0</b></div>
+      </section>
+
+      <footer>
+        <p>QUICK BLAST <kbd id="shortcut">ALT+SHIFT+D</kbd></p>
+        <p class="dim">OR RIGHT-CLICK &gt; BLAST THIS PAGE</p>
+      </footer>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

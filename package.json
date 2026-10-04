@@ -1,0 +1,19 @@
+{
+  "name": "webblaster",
+  "description": "Turn any web page into a destructible retro pixel-art level.",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "compile": "tsc --noEmit",
+    "icons": "node scripts/make-icons.mjs",
+    "postinstall": "wxt prepare && node scripts/make-icons.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "wxt": "^0.21.4"
+  }
+}

@@ -1,0 +1,257 @@
+@font-face {
+  font-family: 'WBPixel';
+  src: url('/fonts/PressStart2P.ttf');
+}
+
+:root {
+  --black: #000000;
+  --navy: #1d2b53;
+  --plum: #7e2553;
+  --slate: #5f574f;
+  --silver: #c2c3c7;
+  --white: #fff1e8;
+  --red: #ff004d;
+  --orange: #ffa300;
+  --yellow: #ffec27;
+  --lime: #00e436;
+  --blue: #29adff;
+  --lavender: #83769c;
+  --void: #05060f;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 340px;
+  background: var(--void);
+  background-image:
+    linear-gradient(#121a3a 2px, transparent 2px),
+    linear-gradient(90deg, #121a3a 2px, transparent 2px);
+  background-size: 32px 32px;
+  color: var(--white);
+  font: 9px/1.7 'WBPixel', ui-monospace, monospace;
+  -webkit-font-smoothing: none;
+  user-select: none;
+}
+
+/* Scanlines over the whole popup. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.25) 0 1px, transparent 1px 3px);
+}
+
+.cabinet {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+.marquee {
+  text-align: center;
+  padding: 12px 8px 10px;
+  background: var(--plum);
+  box-shadow:
+    4px 0 var(--black),
+    -4px 0 var(--black),
+    0 4px var(--black),
+    0 -4px var(--black),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.35);
+}
+
+#hero {
+  width: 192px;
+  height: 64px;
+  image-rendering: pixelated;
+  display: block;
+  margin: 0 auto 8px;
+}
+
+h1 {
+  font-size: 20px;
+  font-weight: normal;
+  color: var(--yellow);
+  text-shadow:
+    3px 3px 0 var(--red),
+    6px 6px 0 var(--black);
+  letter-spacing: 1px;
+}
+
+h1 b {
+  display: block;
+  font-weight: normal;
+  color: var(--blue);
+  text-shadow:
+    3px 3px 0 var(--navy),
+    6px 6px 0 var(--black);
+  margin-top: 6px;
+}
+
+.tagline {
+  margin-top: 10px;
+  color: var(--white);
+  font-size: 7px;
+}
+
+.screen {
+  text-align: center;
+}
+
+button {
+  all: unset;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.big {
+  display: block;
+  width: 100%;
+  padding: 14px 10px 12px;
+  font-size: 11px;
+  color: var(--black);
+  background: var(--yellow);
+  box-shadow:
+    4px 0 var(--black),
+    -4px 0 var(--black),
+    0 4px var(--black),
+    0 -4px var(--black),
+    inset 0 -4px 0 var(--orange),
+    inset 0 4px 0 var(--white);
+  text-align: center;
+}
+
+.big:hover {
+  background: var(--white);
+}
+
+.big:active {
+  transform: translateY(2px);
+  box-shadow:
+    4px 0 var(--black),
+    -4px 0 var(--black),
+    0 4px var(--black),
+    0 -4px var(--black),
+    inset 0 4px 0 var(--orange);
+}
+
+.big:focus-visible,
+.toggle:focus-visible,
+.stepper button:focus-visible {
+  outline: 2px dashed var(--blue);
+  outline-offset: 6px;
+}
+
+.coin {
+  margin-top: 14px;
+  color: var(--red);
+  animation: blink 1s steps(1) infinite;
+}
+
+.err {
+  margin-top: 10px;
+  color: var(--red);
+  background: var(--black);
+  padding: 8px;
+  line-height: 1.8;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.window {
+  background: var(--black);
+  box-shadow:
+    2px 0 var(--white),
+    -2px 0 var(--white),
+    0 2px var(--white),
+    0 -2px var(--white),
+    6px 6px 0 rgba(0, 0, 0, 0.6);
+}
+
+.window h2 {
+  font-size: 9px;
+  font-weight: normal;
+  color: var(--yellow);
+  background: var(--navy);
+  padding: 6px 10px 5px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  color: var(--silver);
+}
+
+.row + .row {
+  border-top: 2px dotted #1d2b53;
+}
+
+.row b {
+  color: var(--yellow);
+  font-weight: normal;
+}
+
+.toggle {
+  min-width: 52px;
+  text-align: center;
+  padding: 4px 6px 3px;
+  color: var(--black);
+  background: var(--slate);
+}
+
+.toggle.on {
+  background: var(--lime);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepper button {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  background: var(--lavender);
+  color: var(--black);
+}
+
+.stepper button:hover,
+.toggle:hover {
+  filter: brightness(1.2);
+}
+
+.stepper output {
+  min-width: 72px;
+  text-align: center;
+  color: var(--white);
+}
+
+footer {
+  text-align: center;
+  line-height: 2.2;
+}
+
+kbd {
+  font-family: inherit;
+  color: var(--yellow);
+}
+
+.dim {
+  color: var(--lavender);
+  font-size: 7px;
+}

@@ -1,0 +1,9 @@
+node_modules
+.output
+.wxt
+web-ext.config.ts
+*.log
+.DS_Store
+# Generated or large artifacts
+promo/
+public/icon/
