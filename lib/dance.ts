@@ -81,7 +81,7 @@ const ROUTINE: ((b: number) => Step)[] = [
 
 /** Where the dancer is `t` seconds into the routine. Loops forever. */
 export function danceStep(t: number): Step {
-  const beats = t / BEAT;
+  const beats = Math.max(0, t) / BEAT;
   const move = ROUTINE[Math.floor(beats / BAR) % ROUTINE.length];
   return move(beats % BAR);
 }

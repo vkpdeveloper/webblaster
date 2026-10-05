@@ -89,6 +89,8 @@ export class Sidekick {
   private readonly onResize = () => this.resize();
   private readonly onMove = (e: MouseEvent) => this.hover(e.clientX, e.clientY);
   private readonly onLeave = () => (this.hovering = false);
+  private readonly onShow = () => document.visibilityState === 'visible' && this.wake();
+  private readonly onRestore = () => this.wake();
 
   constructor(sound: boolean) {
     this.sfx = new Sfx(sound);
@@ -109,6 +111,9 @@ export class Sidekick {
     // The overlay ignores the pointer, so hovering him is a hit test against mouse moves.
     window.addEventListener('mousemove', this.onMove, { passive: true });
     document.documentElement.addEventListener('mouseleave', this.onLeave);
+    // The loop sleeps when he's idle, so repaint him if the browser wiped the canvas (a GPU reset, a tab restore).
+    document.addEventListener('visibilitychange', this.onShow);
+    this.canvas.addEventListener('contextrestored', this.onRestore);
     this.wake();
   }
 
@@ -122,6 +127,8 @@ export class Sidekick {
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('mousemove', this.onMove);
     document.documentElement.removeEventListener('mouseleave', this.onLeave);
+    document.removeEventListener('visibilitychange', this.onShow);
+    this.canvas.removeEventListener('contextrestored', this.onRestore);
     this.sfx.close();
     this.host.remove();
   }
@@ -190,14 +197,17 @@ export class Sidekick {
   }
 
   private frame = (t: number): void => {
-    const dt = Math.min(0.05, (t - this.last) / 1000);
+    // Cleared first so a throw can't wedge the loop: the next wake() starts it again.
+    this.raf = 0;
+    // The first frame's timestamp can predate the performance.now() taken in wake(), so clamp at zero.
+    const dt = Math.max(0, Math.min(0.05, (t - this.last) / 1000));
     this.last = t;
     this.update(dt);
     this.draw();
     // Sleep once he's out of targets, done dancing, and the smoke has cleared.
     const settled =
       !this.current && !this.linger && !this.sparks.length && !this.booms.length && !this.rings.length && !this.notes.length && !this.bullet;
-    this.raf = settled ? 0 : requestAnimationFrame(this.frame);
+    if (!settled) this.raf = requestAnimationFrame(this.frame);
   };
 
   private update(dt: number): void {
