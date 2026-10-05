@@ -49,6 +49,18 @@ const LEGS = {
   air: ['....kbbnkbbnk...', '....kbbk.kbbk...', '.....kbnkbnk....', '.....kbbkbbk....', '.....kBBkBBk....', '....kBBBkBBBk...', '....kkkkkkkkk...'],
 };
 
+// The sidekick's dancing torso: same commando, arms left off so they can be drawn free-moving.
+const DANCE_TOP = [
+  ...TOP.slice(0, 8),
+  '....keeeeeeeek..',
+  '....keeBeeeBek..',
+  '....keeeBBBeek..',
+  '....kBeeeeeeBk..',
+  '....keBeeBeBek..',
+  '....keeBeBeek...',
+  ...TOP.slice(14),
+];
+
 /** The somersault jump: the commando curls into a spinning ball. */
 const BALL = [
   '....kkkkkk....',
@@ -91,6 +103,7 @@ const soldierLegs = (rows: string[]) => rows.map((r) => r.replace(/b/g, 'g').rep
 
 const MEDAL = ['.kr.rk.', '.krkrk.', '..krk..', '.kyyyk.', 'kyywyyk', 'kyyyyok', 'kyyyook', '.kyook.', '..kkk..'];
 const HEART = ['.KK.KK.', 'KKKKKKK', 'KKwKKKK', '.KKKKK.', '..KKK..', '...K...'];
+const NOTE = ['...kkkk', '...kyyk', '...kykk', '...ky..', '.kkky..', 'kyyyy..', 'kyyyk..', '.kkk...'];
 const ARROWS = ['..L....', '.LLL...', 'L.L..L.', '..L..L.', '..L.LLL', '.....L.'];
 
 export type Pose = keyof typeof LEGS;
@@ -227,6 +240,8 @@ type Facing = { right: HTMLCanvasElement; left: HTMLCanvasElement };
 export class Sprites {
   readonly hero: Record<Pose, Facing>;
   readonly ball = paint(BALL);
+  /** The hero with arms left off, for the x.com sidekick's dance. */
+  readonly dancer: Record<Pose, Facing>;
   readonly soldier: Record<Pose, Facing>;
   /** Weapons pointing right, plus a vertically flipped copy used when aiming left. */
   readonly weapons: Record<WeaponId, { up: HTMLCanvasElement; down: HTMLCanvasElement }>;
@@ -234,6 +249,7 @@ export class Sprites {
   readonly rocket = paint(ROCKET);
   readonly heart = paint(HEART);
   readonly arrows = paint(ARROWS);
+  readonly notes = [paint(NOTE), paint(NOTE.map((r) => r.replace(/y/g, 'K'))), paint(NOTE.map((r) => r.replace(/y/g, 'b')))];
   readonly medal = paint(MEDAL);
   /** NES-style explosion animation frames. */
   readonly boom = explosionFrames();
@@ -245,6 +261,7 @@ export class Sprites {
     };
     const poses = Object.keys(LEGS) as Pose[];
     this.hero = Object.fromEntries(poses.map((p) => [p, make(TOP, LEGS[p])])) as Record<Pose, Facing>;
+    this.dancer = Object.fromEntries(poses.map((p) => [p, make(DANCE_TOP, LEGS[p])])) as Record<Pose, Facing>;
     this.soldier = Object.fromEntries(poses.map((p) => [p, make(SOLDIER_TOP, soldierLegs(LEGS[p]))])) as Record<Pose, Facing>;
     const gun = (id: WeaponId) => {
       const up = paint(WEAPON_ART[id].rows);

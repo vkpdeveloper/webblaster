@@ -131,6 +131,19 @@ export class Sfx {
     [523, 523, 784, 784, 1047, 988, 1047].forEach((f, i) => this.tone('square', f, f, 0.12, 0.18, i * 0.11));
   }
 
+  /** Dhol for the sidekick's dance: a deep thump on the beat, a dry slap off it. */
+  dhol(strong: boolean): void {
+    if (!this.ready()) return;
+    if (strong) this.tone('sine', 140, 55, 0.22, 0.5);
+    else this.noise(0.05, 0.14, 3200, 'bandpass', 2200);
+  }
+
+  /** One plucked note of a tumbi riff. */
+  tumbi(freq: number): void {
+    if (!this.ready()) return;
+    this.tone('square', freq, freq * 0.97, 0.09, 0.05);
+  }
+
   jet(on: boolean): void {
     if (this.jetGain && this.ctx) this.jetGain.gain.setTargetAtTime(on ? 0.18 : 0, this.ctx.currentTime, 0.03);
   }
