@@ -1,0 +1,9 @@
+dance.mp3
+
+"My Heart, My Universe" from The Big Bang Theory, season 4, episode 14, "The Thespian Catalyst" (2011).
+The Big Bang Theory is produced by Chuck Lorre Productions and Warner Bros. Television. All rights to the
+song and the show belong to their respective owners.
+
+This clip is trimmed to 112 beats and re-encoded (mono, 48 kbps) for the Web Blaster x.com sidekick's dance.
+It is included as a fan tribute, is not licensed, and is not covered by this project's terms. Rights holders
+can ask for its removal by opening an issue at https://github.com/vkpdeveloper/webblaster/issues.
