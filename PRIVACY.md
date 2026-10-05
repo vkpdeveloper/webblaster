@@ -12,7 +12,7 @@ personal data, browsing history, page content or analytics. There is no server a
   The screenshots and layout stay in memory in that tab and are discarded when you quit or leave the page. They are
   never saved or sent anywhere.
 - **x.com and twitter.com.** If the X.com sidekick is turned on, a script on those sites notices when you click the
-  Like, Repost or Post button, plays a short animation of the character shooting it, and then lets your original
+  Like, Bookmark, Repost, Quote or Post button, plays a short animation of the character shooting it, and then lets your original
   click through. It does not read your posts, messages, timeline or account details, and it never acts unless you
   click one of those buttons yourself. You can switch it off in the popup.
 - **Local storage.** Your settings (sound, CRT effect, level size, enemies, sidekick) and game stats (high score,

@@ -39,8 +39,8 @@ spread gun, rocket launcher and laser. Enemies can be switched off in the popup 
 
 ### x.com sidekick
 
-On x.com the commando waits at the bottom of the screen. Click **Like**, **Repost** or **Post** and he flies over,
-shoots the button, and then your click goes through. Toggle it with **X.COM SIDEKICK** in the popup.
+On x.com the commando waits at the bottom of the screen. Click **Like**, **Bookmark**, **Post**, or **Repost** /
+**Quote** in the repost menu, and he shoots the button from where he stands, then your click goes through. Toggle it with **X.COM SIDEKICK** in the popup.
 
 ## How it works
 
@@ -53,8 +53,8 @@ shoots the button, and then your click goes through. Toggle it with **X.COM SIDE
    picture with `destination-out`, revealing the void.
 4. **Game** (`lib/game/game.ts`): fixed-step physics, five weapons plus grenades, enemies (`lib/game/enemies.ts`),
    particles, and a canvas overlay in a closed shadow root. Sound effects are synthesized (`lib/game/audio.ts`).
-5. **Sidekick** (`lib/sidekick.ts`, `entrypoints/x.content.ts`): holds trusted clicks on x.com's like, repost and post
-   buttons, plays the shot, then replays the click.
+5. **Sidekick** (`lib/sidekick.ts`, `entrypoints/x.content.ts`): holds trusted clicks on x.com's like, bookmark, repost,
+   quote and post buttons, plays the shot, then replays the click.
 
 Permissions: `activeTab`, `scripting`, `storage`, `contextMenus`, plus a content script on x.com / twitter.com for the
 sidekick. There is no server; nothing leaves the browser.

@@ -7,7 +7,7 @@ export interface Settings {
   maxScreens: number;
   /** Enemy soldiers storm the page while you play. */
   enemies: boolean;
-  /** On x.com, the commando shoots Like, Repost and Post for you. */
+  /** On x.com, the commando shoots Like, Bookmark, Repost and Post for you. */
   xSidekick: boolean;
 }
 

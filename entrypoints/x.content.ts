@@ -1,7 +1,7 @@
 import { DEFAULT_SETTINGS, loadSettings, settingsItem } from '@/lib/settings';
 import { Sidekick } from '@/lib/sidekick';
 
-// On x.com the commando sticks around and shoots Like, Repost and Post for you.
+// On x.com the commando sticks around and shoots Like, Bookmark, Repost and Post for you.
 export default defineContentScript({
   matches: ['*://x.com/*', '*://twitter.com/*', '*://mobile.x.com/*', '*://mobile.twitter.com/*'],
   runAt: 'document_idle',

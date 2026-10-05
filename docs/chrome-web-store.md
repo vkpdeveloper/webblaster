@@ -5,7 +5,7 @@ Copy these into the item's **Privacy practices** tab.
 ## Single purpose
 
 > Web Blaster turns the web page you are viewing into a playable retro arcade game: you run, jump and shoot to
-> blast the page apart. On x.com, an optional sidekick character animates your own Like, Repost and Post clicks
+> blast the page apart. On x.com, an optional sidekick character animates your own Like, Bookmark, Repost and Post clicks
 > in the same game style.
 
 ## Permission justifications
@@ -34,7 +34,7 @@ Copy these into the item's **Privacy practices** tab.
 **Host permissions (x.com, twitter.com)**
 
 > Needed only for the optional x.com sidekick. A content script on x.com and twitter.com listens for the user's own
-> clicks on the Like, Repost and Post buttons, plays a short animation of the game character shooting the button,
+> clicks on the Like, Bookmark, Repost, Quote and Post buttons, plays a short animation of the game character shooting the button,
 > then passes the original click through unchanged. It does not read posts, messages, timelines or account data,
 > never clicks anything on its own, and can be turned off in the popup. No other sites get a persistent content
 > script.

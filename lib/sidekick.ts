@@ -1,27 +1,24 @@
-import { FIRE, P } from './palette';
+import { P } from './palette';
 import { Sfx } from './game/audio';
-import { SPRITE_H, SPRITE_W, Sprites, WEAPON_ART, type Pose } from './game/sprites';
+import { SPRITE_H, SPRITE_W, Sprites, WEAPON_ART } from './game/sprites';
 
-// The buttons the sidekick shoots for you on x.com.
+// The buttons the sidekick shoots for you on x.com. The Repost button only opens a menu, so he shoots the
+// Repost / Undo repost / Quote item you pick in it instead.
+const QUOTE = '[data-testid="Dropdown"] a[role="menuitem"][href*="/compose/"]';
 const TARGETS = [
-  'like',
-  'unlike',
-  'retweet',
-  'unretweet',
-  'retweetConfirm',
-  'unretweetConfirm',
-  'tweetButton',
-  'tweetButtonInline',
-]
-  .map((id) => `[data-testid="${id}"]`)
-  .join(',');
+  ...['like', 'unlike', 'bookmark', 'removeBookmark', 'retweetConfirm', 'unretweetConfirm', 'tweetButton', 'tweetButtonInline'].map(
+    (id) => `[data-testid="${id}"]`,
+  ),
+  QUOTE,
+].join(',');
 
-type Flavor = 'like' | 'repost' | 'post';
+type Flavor = 'like' | 'bookmark' | 'repost' | 'post';
 
 const flavorOf = (el: Element): Flavor => {
   const id = el.getAttribute('data-testid') ?? '';
   if (id.includes('like')) return 'like';
-  if (id.includes('retweet')) return 'repost';
+  if (id.toLowerCase().includes('bookmark')) return 'bookmark';
+  if (id.includes('retweet') || el.matches(QUOTE)) return 'repost';
   return 'post';
 };
 
@@ -30,7 +27,7 @@ const S = 2;
 const GUN = WEAPON_ART.rifle;
 /** Feet-to-gun height in CSS px. */
 const GUN_Y = 24;
-const FLY_SPEED = 1500;
+const BULLET_SPEED = 3200;
 
 interface Spark {
   x: number;
@@ -45,8 +42,8 @@ interface Spark {
 }
 
 /**
- * A little run-and-gun commando that lives at the bottom of x.com. Click Like, Repost or Post and he
- * rocket-boots over, shoots the button, and only then lets your click through.
+ * A little run-and-gun commando that lives at the bottom of x.com. Click Like, Bookmark, Repost, Quote or Post
+ * and he shoots the button from where he stands, and only then lets your click through.
  */
 export class Sidekick {
   private readonly host: HTMLElement;
@@ -62,8 +59,7 @@ export class Sidekick {
   private x = 0;
   private y = 0;
   private facing = -1;
-  private state: 'idle' | 'fly' | 'aim' | 'hover' | 'home' = 'idle';
-  private stateT = 0;
+  private aimT = 0;
   private queue: { el: HTMLElement; flavor: Flavor }[] = [];
   private current: { el: HTMLElement; flavor: Flavor } | null = null;
   private bullet: { x: number; y: number; px: number; py: number } | null = null;
@@ -73,7 +69,6 @@ export class Sidekick {
   private muzzleT = 0;
   private raf = 0;
   private last = 0;
-  private time = 0;
   private readonly onClick = (e: MouseEvent) => this.intercept(e);
   private readonly onResize = () => this.resize();
 
@@ -125,30 +120,19 @@ export class Sidekick {
 
   private next(): void {
     this.current = this.queue.shift() ?? null;
-    if (this.current) this.setState('fly');
-    else this.setState('hover');
-  }
-
-  private setState(s: typeof this.state): void {
-    this.state = s;
-    this.stateT = 0;
+    this.aimT = 0;
   }
 
   private home(): [number, number] {
     return [this.vw - 96, this.vh - 4];
   }
 
-  /** Where to stand to shoot a button: beside it, gun level with its center. */
-  private post(el: HTMLElement): { x: number; y: number; cx: number; cy: number } | null {
+  /** Center of a button in viewport px, or null once it's gone. */
+  private center(el: HTMLElement): { cx: number; cy: number } | null {
     if (!el.isConnected) return null;
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return null;
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height / 2;
-    const fromLeft = cx > 240;
-    const x = Math.max(24, Math.min(this.vw - 24, fromLeft ? r.left - 70 : r.right + 70));
-    const y = Math.max(SPRITE_H * S, Math.min(this.vh - 4, cy + GUN_Y));
-    return { x, y, cx, cy };
+    return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
   }
 
   private resize(): void {
@@ -157,7 +141,7 @@ export class Sidekick {
     this.dpr = devicePixelRatio || 1;
     this.canvas.width = Math.round(this.vw * this.dpr);
     this.canvas.height = Math.round(this.vh * this.dpr);
-    if (this.state === 'idle') [this.x, this.y] = this.home();
+    [this.x, this.y] = this.home();
     this.wake();
   }
 
@@ -170,54 +154,24 @@ export class Sidekick {
   private frame = (t: number): void => {
     const dt = Math.min(0.05, (t - this.last) / 1000);
     this.last = t;
-    this.time += dt;
     this.update(dt);
     this.draw();
-    // Sleep once he's parked and the smoke has cleared.
-    const settled = this.state === 'idle' && !this.sparks.length && !this.booms.length && !this.rings.length && !this.bullet;
+    // Sleep once he's out of targets and the smoke has cleared.
+    const settled = !this.current && !this.sparks.length && !this.booms.length && !this.rings.length && !this.bullet;
     this.raf = settled ? 0 : requestAnimationFrame(this.frame);
   };
 
-  private flyTo(tx: number, ty: number, dt: number): boolean {
-    const dx = tx - this.x;
-    const dy = ty - this.y;
-    const d = Math.hypot(dx, dy);
-    if (Math.abs(dx) > 4) this.facing = dx > 0 ? 1 : -1;
-    const step = Math.min(d, Math.max(FLY_SPEED * dt, d * Math.min(1, dt * 10)));
-    if (d > 0.5) {
-      this.x += (dx / d) * step;
-      this.y += (dy / d) * step;
-    }
-    // Rocket boot exhaust.
-    for (const bx of [-8, 8]) {
-      if (Math.random() < 0.5) continue;
-      const life = 0.15 + Math.random() * 0.2;
-      this.sparks.push({ x: this.x + bx, y: this.y, vx: (Math.random() - 0.5) * 40, vy: 160 + Math.random() * 120, life, max: life, color: FIRE[(Math.random() * 4) | 0], size: 4 });
-    }
-    return d < 3;
-  }
-
   private update(dt: number): void {
-    this.stateT += dt;
     this.muzzleT -= dt;
     const cur = this.current;
-    const spot = cur ? this.post(cur.el) : null;
+    const spot = cur ? this.center(cur.el) : null;
     if (cur && !spot) {
+      this.bullet = null;
       this.next();
-    } else if (this.state === 'fly' && spot) {
-      if (this.flyTo(spot.x, spot.y, dt) || this.stateT > 1.2) this.setState('aim');
-    } else if (this.state === 'aim' && spot) {
+    } else if (spot) {
+      this.aimT += dt;
       this.facing = spot.cx > this.x ? 1 : -1;
-      this.flyTo(spot.x, spot.y, dt);
-      if (this.stateT > 0.08 && !this.bullet) this.fire(spot.cx, spot.cy);
-    } else if (this.state === 'hover') {
-      if (this.stateT > 0.9) this.setState('home');
-    } else if (this.state === 'home') {
-      const [hx, hy] = this.home();
-      if (this.flyTo(hx, hy, dt)) {
-        this.facing = -1;
-        this.setState('idle');
-      }
+      if (this.aimT > 0.08 && !this.bullet) this.fire(spot.cx, spot.cy);
     }
 
     if (this.bullet && cur && spot) {
@@ -227,7 +181,7 @@ export class Sidekick {
       const dx = spot.cx - b.x;
       const dy = spot.cy - b.y;
       const d = Math.hypot(dx, dy);
-      const step = 2400 * dt;
+      const step = BULLET_SPEED * dt;
       if (d <= step) {
         this.bullet = null;
         this.hit(cur, spot.cx, spot.cy);
@@ -282,6 +236,11 @@ export class Sidekick {
       this.rings.push({ x, y, r: 6, max: 46, life: 0.35, color: P.pink });
       this.booms.push({ x, y, scale: 0.9, t: 0 });
       this.sfx.hit();
+    } else if (flavor === 'bookmark') {
+      burst(24, [P.blue, P.white, P.navy], 300);
+      this.rings.push({ x, y, r: 6, max: 46, life: 0.35, color: P.blue });
+      this.booms.push({ x, y, scale: 0.9, t: 0 });
+      this.sfx.hit();
     } else if (flavor === 'repost') {
       burst(10, [P.lime], 260, this.sprites.arrows);
       burst(14, [P.lime, P.white, P.green], 300);
@@ -319,26 +278,20 @@ export class Sidekick {
     }
     ctx.globalAlpha = 1;
 
-    const flying = this.state === 'fly' || this.state === 'aim' || this.state === 'home' || this.state === 'hover';
-    const pose: Pose = flying ? 'air' : 'stand';
-    const img = this.sprites.hero[pose][this.facing > 0 ? 'right' : 'left'];
+    const img = this.sprites.hero.stand[this.facing > 0 ? 'right' : 'left'];
     const w = SPRITE_W * S;
     const h = SPRITE_H * S;
-    // Gentle bob while hovering, an occasional blink-length crouch while idle.
-    const bob = flying ? Math.round(Math.sin(this.time * 9) * 2) : 0;
-    const x = Math.round(this.x - w / 2);
-    const y = Math.round(this.y - h + bob);
-    ctx.drawImage(img, x, y, w, h);
+    ctx.drawImage(img, Math.round(this.x - w / 2), Math.round(this.y - h), w, h);
 
     // Rifle, pointed at the target (or slung forward when idle).
-    const target = this.current ? this.post(this.current.el) : null;
+    const target = this.current ? this.center(this.current.el) : null;
     const o = this.gunOrigin();
     const a = target ? Math.atan2(target.cy - o.y, target.cx - o.x) : this.facing > 0 ? 0 : Math.PI;
     const left = Math.cos(a) < 0;
     const gun = left ? this.sprites.weapons.rifle.down : this.sprites.weapons.rifle.up;
     const pivotY = left ? gun.height - 1 - GUN.pivot[1] : GUN.pivot[1];
     ctx.save();
-    ctx.translate(Math.round(o.x), Math.round(o.y + bob));
+    ctx.translate(Math.round(o.x), Math.round(o.y));
     ctx.rotate(a);
     ctx.drawImage(gun, -GUN.pivot[0] * S, -pivotY * S, gun.width * S, gun.height * S);
     if (this.muzzleT > 0) {
