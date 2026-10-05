@@ -10,6 +10,8 @@ export class Sfx {
   private laserOsc: OscillatorNode | null = null;
   private laserGain: GainNode | null = null;
   private last = new Map<string, number>();
+  private song: AudioBuffer | null = null;
+  private songOut: { src: AudioBufferSourceNode; gain: GainNode; start: number } | null = null;
 
   constructor(private enabled: boolean) {}
 
@@ -38,6 +40,7 @@ export class Sfx {
   close(): void {
     void this.ctx?.close();
     this.ctx = null;
+    this.songOut = null;
   }
 
   shot(kind: ShotSound): void {
@@ -142,6 +145,46 @@ export class Sfx {
   tumbi(freq: number): void {
     if (!this.ready()) return;
     this.tone('square', freq, freq * 0.97, 0.09, 0.05);
+  }
+
+  /** Fetch and decode a song for `music()`. Leaves `hasSong` false if the file is missing or unreadable. */
+  async loadSong(url: string): Promise<void> {
+    try {
+      const res = await fetch(url);
+      if (res.ok) this.song = await new OfflineAudioContext(2, 1, 44100).decodeAudioData(await res.arrayBuffer());
+    } catch {
+      this.song = null;
+    }
+  }
+
+  get hasSong(): boolean {
+    return !!this.song;
+  }
+
+  /** Loop the loaded song from the top, or fade it out. */
+  music(on: boolean): void {
+    if (on && !this.songOut && this.song && this.ready()) {
+      const ctx = this.ctx!;
+      const src = ctx.createBufferSource();
+      src.buffer = this.song;
+      src.loop = true;
+      const gain = ctx.createGain();
+      src.connect(gain).connect(this.master!);
+      src.start();
+      this.songOut = { src, gain, start: ctx.currentTime };
+    } else if (!on && this.songOut && this.ctx) {
+      const t = this.ctx.currentTime;
+      this.songOut.gain.gain.setTargetAtTime(0, t, 0.08);
+      this.songOut.src.stop(t + 0.4);
+      this.songOut = null;
+    }
+  }
+
+  /** Seconds into the song as it's heard, or null when it isn't playing. */
+  musicTime(): number | null {
+    if (!this.songOut || !this.song || this.ctx?.state !== 'running') return null;
+    const t = this.ctx.currentTime - this.songOut.start - (this.ctx.outputLatency || 0);
+    return Math.max(0, t) % this.song.duration;
   }
 
   jet(on: boolean): void {

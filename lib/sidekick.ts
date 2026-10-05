@@ -82,6 +82,7 @@ export class Sidekick {
   private hovering = false;
   private linger = 0;
   private danceT = 0;
+  private halfBeat = -1;
   private notes: { x: number; y: number; t: number; img: HTMLCanvasElement }[] = [];
   private raf = 0;
   private last = 0;
@@ -94,6 +95,7 @@ export class Sidekick {
 
   constructor(sound: boolean) {
     this.sfx = new Sfx(sound);
+    void this.sfx.loadSong(browser.runtime.getURL('/music/dance.mp3'));
     this.host = document.createElement('web-blaster-sidekick');
     this.host.style.cssText =
       'position:fixed!important;inset:0!important;z-index:2147483646!important;pointer-events:none!important;display:block!important;';
@@ -214,8 +216,12 @@ export class Sidekick {
   private update(dt: number): void {
     this.muzzleT -= dt;
     this.linger = this.hovering ? LINGER : Math.max(0, this.linger - dt);
+    this.sfx.music(this.dancing());
     if (this.dancing()) this.groove(dt);
-    else this.danceT = 0;
+    else {
+      this.danceT = 0;
+      this.halfBeat = -1;
+    }
     const cur = this.current;
     const spot = cur ? this.center(cur.el) : null;
     if (cur && !spot) {
@@ -265,17 +271,20 @@ export class Sidekick {
     this.notes = this.notes.filter((n) => n.t < 1.4);
   }
 
-  /** Advance the dance; on every half beat play the dhol and tumbi, and on whole beats throw notes and marigolds. */
+  /**
+   * Advance the dance, locked to the song while it plays. On every half beat play the dhol and tumbi (unless there's a
+   * song), and on whole beats throw notes and marigolds.
+   */
   private groove(dt: number): void {
-    const halves = (t: number) => Math.floor((t / BEAT) * 2);
-    const first = this.danceT === 0;
-    const before = halves(this.danceT);
-    this.danceT += dt;
-    const n = halves(this.danceT);
-    if (!first && n === before) return;
-    this.sfx.dhol(n % 2 === 0);
-    const note = RIFF[n % RIFF.length];
-    if (note) this.sfx.tumbi(note);
+    this.danceT = this.sfx.musicTime() ?? this.danceT + dt;
+    const n = Math.floor((this.danceT / BEAT) * 2);
+    if (n === this.halfBeat) return;
+    this.halfBeat = n;
+    if (!this.sfx.hasSong) {
+      this.sfx.dhol(n % 2 === 0);
+      const note = RIFF[n % RIFF.length];
+      if (note) this.sfx.tumbi(note);
+    }
     if (n % 2) return;
     const head = this.y - SPRITE_H * S;
     this.notes.push({ x: this.x + (Math.random() - 0.5) * 32, y: head, t: 0, img: this.sprites.notes[(n / 2) % this.sprites.notes.length] });

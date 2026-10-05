@@ -19,6 +19,10 @@ export default defineConfig({
         resources: ['fonts/*.ttf'],
         matches: ['<all_urls>'],
       },
+      {
+        resources: ['music/dance.mp3'],
+        matches: ['*://x.com/*', '*://twitter.com/*', '*://mobile.x.com/*', '*://mobile.twitter.com/*'],
+      },
     ],
   },
 });

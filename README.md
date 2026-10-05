@@ -42,7 +42,8 @@ spread gun, rocket launcher and laser. Enemies can be switched off in the popup 
 On x.com the commando waits at the bottom of the screen. Click **Like**, **Bookmark**, **Post**, or **Repost** /
 **Quote** in the repost menu, and he shoots the button from where he stands, then your click goes through. Hover
 over him and he breaks into a Bollywood routine: light bulb, shoulder shimmy, pat-the-dog, bhangra and a spin, with
-dhol, notes and marigolds. Toggle it with **X.COM SIDEKICK** in the popup.
+notes and marigolds, to Raj's "My Heart, My Universe" (`public/music/dance.mp3`). The steps are locked to the song's
+beat. Toggle it with **X.COM SIDEKICK** in the popup.
 
 ## How it works
 

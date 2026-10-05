@@ -1,7 +1,7 @@
 import type { Pose } from './game/sprites';
 
-/** Seconds per beat: a brisk filmi 128 BPM. */
-export const BEAT = 60 / 128;
+/** Seconds per beat: the 109.25 BPM of public/music/dance.mp3, which is trimmed to start on a downbeat. */
+export const BEAT = 60 / 109.25;
 /** Beats per move before the routine moves on. */
 const BAR = 8;
 
