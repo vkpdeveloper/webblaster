@@ -169,7 +169,8 @@ export class Sidekick {
   }
 
   private home(): [number, number] {
-    return [this.vw - 96, this.vh - 4];
+    // Clear of X's floating Grok and Chat buttons in the bottom-right corner.
+    return [this.vw - 200, this.vh - 4];
   }
 
   /** Center of a button in viewport px, or null once it's gone. */
