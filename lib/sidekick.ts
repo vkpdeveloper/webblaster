@@ -1,3 +1,4 @@
+import { FONT, loadFont } from './font';
 import { P } from './palette';
 import { Sfx } from './game/audio';
 import { BEAT, danceStep, type Arm } from './dance';
@@ -39,6 +40,10 @@ const RIFF = [988, 0, 1175, 988, 880, 0, 784, 880, 988, 0, 1319, 1175, 988, 880,
 const SPOT = [P.pink, P.yellow, P.blue, P.lime];
 /** How long he keeps dancing after the mouse leaves him. */
 const LINGER = 1.2;
+/** Shots within this many seconds of each other build a streak. */
+const STREAK_WINDOW = 3;
+const RECOIL = 0.09;
+const FLAVOR_COLOR: Record<Flavor, string> = { like: P.pink, bookmark: P.blue, repost: P.lime, post: P.yellow };
 
 interface Spark {
   x: number;
@@ -50,6 +55,8 @@ interface Spark {
   color: string;
   size: number;
   img?: HTMLCanvasElement;
+  /** Spent brass: bounces on the floor he stands on. */
+  shell?: boolean;
 }
 
 /**
@@ -79,6 +86,14 @@ export class Sidekick {
   private booms: { x: number; y: number; scale: number; t: number }[] = [];
   private rings: { x: number; y: number; r: number; max: number; life: number; color: string }[] = [];
   private muzzleT = 0;
+  /** Gun and body kick back for a moment after each shot. */
+  private recoil = 0;
+  /** White impact frames where a shot lands. */
+  private flashes: { x: number; y: number; r: number; t: number }[] = [];
+  /** Buttons shot in quick succession, and time left to keep the streak going. */
+  private streak = 0;
+  private streakT = 0;
+  private texts: { x: number; y: number; t: number; text: string; color: string; size: number }[] = [];
   private hovering = false;
   private linger = 0;
   private danceT = 0;
@@ -96,6 +111,7 @@ export class Sidekick {
   constructor(sound: boolean) {
     this.sfx = new Sfx(sound);
     void this.sfx.loadSong(browser.runtime.getURL('/music/dance.mp3'));
+    void loadFont();
     this.host = document.createElement('web-blaster-sidekick');
     this.host.style.cssText =
       'position:fixed!important;inset:0!important;z-index:2147483646!important;pointer-events:none!important;display:block!important;';
@@ -209,12 +225,23 @@ export class Sidekick {
     this.draw();
     // Sleep once he's out of targets, done dancing, and the smoke has cleared.
     const settled =
-      !this.current && !this.linger && !this.sparks.length && !this.booms.length && !this.rings.length && !this.notes.length && !this.bullet;
+      !this.current &&
+      !this.linger &&
+      !this.sparks.length &&
+      !this.booms.length &&
+      !this.rings.length &&
+      !this.notes.length &&
+      !this.flashes.length &&
+      !this.texts.length &&
+      !this.bullet;
     if (!settled) this.raf = requestAnimationFrame(this.frame);
   };
 
   private update(dt: number): void {
     this.muzzleT -= dt;
+    this.recoil = Math.max(0, this.recoil - dt);
+    this.streakT -= dt;
+    if (this.streakT <= 0) this.streak = 0;
     this.linger = this.hovering ? LINGER : Math.max(0, this.linger - dt);
     this.sfx.music(this.dancing());
     if (this.dancing()) this.groove(dt);
@@ -250,13 +277,27 @@ export class Sidekick {
       }
     }
 
+    const floor = this.y - 2;
     for (const p of this.sparks) {
       p.life -= dt;
       p.vy += 500 * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
+      if (p.shell && p.y > floor && p.vy > 0) {
+        p.y = floor;
+        if (p.vy > 80) this.sfx.shell();
+        p.vy *= -0.45;
+        p.vx *= 0.6;
+      }
     }
     this.sparks = this.sparks.filter((p) => p.life > 0);
+    for (const f of this.flashes) f.t += dt;
+    this.flashes = this.flashes.filter((f) => f.t < 0.07);
+    for (const t of this.texts) {
+      t.t += dt;
+      t.y -= 40 * dt;
+    }
+    this.texts = this.texts.filter((t) => t.t < 1);
     for (const b of this.booms) b.t += dt;
     this.booms = this.booms.filter((b) => b.t < 0.42);
     for (const g of this.rings) {
@@ -305,7 +346,11 @@ export class Sidekick {
     const reach = (GUN.muzzle[0] - GUN.pivot[0]) * S;
     this.bullet = { x: o.x + Math.cos(a) * reach, y: o.y + Math.sin(a) * reach, px: o.x, py: o.y };
     this.muzzleT = 0.06;
+    this.recoil = RECOIL;
     this.sfx.shot('blaster');
+    // The casing flicks out backwards and clinks around his feet.
+    const life = 2 + Math.random();
+    this.sparks.push({ x: o.x, y: o.y - 4, vx: -Math.cos(a) * (60 + Math.random() * 60), vy: -220 - Math.random() * 80, life, max: life, color: Math.random() < 0.5 ? P.orange : P.yellow, size: 2, shell: true });
   }
 
   private hit(target: { el: HTMLElement; flavor: Flavor }, x: number, y: number): void {
@@ -341,9 +386,35 @@ export class Sidekick {
       this.booms.push({ x, y, scale: 2, t: 0 });
       this.sfx.boom(14);
     }
+    this.flashes.push({ x, y, r: flavor === 'post' ? 30 : 18, t: 0 });
+    // A streak of shots climbs the scale, and the counter over the button grows with it.
+    this.streak++;
+    this.streakT = STREAK_WINDOW;
+    this.sfx.combo(this.streak * 2);
+    if (this.streak >= 2) {
+      this.texts.push({ x, y: y - 22, t: 0, text: `x${this.streak}`, color: FLAVOR_COLOR[flavor], size: Math.min(26, 10 + this.streak * 2) });
+    }
+    if (this.streak % 5 === 0) {
+      this.sfx.tier(this.streak / 5);
+      this.rings.push({ x, y, r: 10, max: 120, life: 0.5, color: FLAVOR_COLOR[flavor] });
+      burst(20, [P.white, P.yellow, FLAVOR_COLOR[flavor]], 480);
+    }
+    // The button gets punched: squash, overshoot, settle.
     el.animate(
-      [{ transform: 'translate(0,0)' }, { transform: 'translate(-3px,2px)' }, { transform: 'translate(3px,-2px)' }, { transform: 'translate(-2px,-1px)' }, { transform: 'translate(0,0)' }],
-      { duration: 220, easing: 'steps(4)' },
+      [
+        { transform: 'scale(1)' },
+        { transform: 'scale(1.45, 0.75) rotate(-8deg)' },
+        { transform: 'scale(0.85, 1.25) rotate(6deg)' },
+        { transform: 'scale(1.1) rotate(-2deg)' },
+        { transform: 'scale(1)' },
+      ],
+      { duration: 320, easing: 'ease-out' },
+    );
+    // And the post it belongs to takes the hit too.
+    const card = el.closest('article');
+    card?.animate(
+      [{ transform: 'translate(0,0)' }, { transform: 'translate(-4px,2px)' }, { transform: 'translate(3px,-2px)' }, { transform: 'translate(-1px,1px)' }, { transform: 'translate(0,0)' }],
+      { duration: 200, easing: 'steps(4)' },
     );
     // The shot landed: now let the real click through.
     el.click();
@@ -371,8 +442,15 @@ export class Sidekick {
 
     if (this.bullet) {
       const b = this.bullet;
-      ctx.fillStyle = P.slate;
-      ctx.fillRect(Math.round(b.px) - 2, Math.round(b.py) - 2, 4, 4);
+      // Tracer streak back along the bullet's path.
+      ctx.lineCap = 'square';
+      ctx.strokeStyle = P.yellow;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(b.px), Math.round(b.py));
+      ctx.lineTo(Math.round(b.x), Math.round(b.y));
+      ctx.stroke();
+      ctx.lineCap = 'butt';
       ctx.fillStyle = P.white;
       ctx.fillRect(Math.round(b.x) - 3, Math.round(b.y) - 3, 6, 6);
       ctx.fillStyle = P.yellow;
@@ -382,7 +460,11 @@ export class Sidekick {
     for (const p of this.sparks) {
       ctx.globalAlpha = Math.min(1, (p.life / p.max) * 2);
       if (p.img) ctx.drawImage(p.img, Math.round(p.x - p.img.width), Math.round(p.y - p.img.height), p.img.width * 2, p.img.height * 2);
-      else {
+      else if (p.shell) {
+        const spin = Math.abs(p.vy) > 30 && Math.floor(p.life * 24) % 2;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(Math.round(p.x), Math.round(p.y), spin ? 2 : 4, spin ? 4 : 2);
+      } else {
         ctx.fillStyle = p.color;
         ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size);
       }
@@ -398,6 +480,30 @@ export class Sidekick {
       const size = frame.width * S * b.scale;
       ctx.drawImage(frame, Math.round(b.x - size / 2), Math.round(b.y - size / 2), size, size);
     }
+    for (const f of this.flashes) {
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, f.t < 0.035 ? f.r : f.r * 1.4, 0, Math.PI * 2);
+      if (f.t < 0.035) {
+        ctx.fillStyle = P.white;
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = P.white;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+    }
+    ctx.textAlign = 'center';
+    for (const t of this.texts) {
+      // Slams in big, then settles and floats away.
+      const size = Math.round(t.size * (t.t < 0.1 ? 1.8 - t.t * 8 : 1));
+      ctx.globalAlpha = Math.min(1, (1 - t.t) * 3);
+      ctx.font = `${size}px ${FONT}, monospace`;
+      ctx.fillStyle = P.black;
+      ctx.fillText(t.text, Math.round(t.x) + 2, Math.round(t.y) + 2);
+      ctx.fillStyle = t.color;
+      ctx.fillText(t.text, Math.round(t.x), Math.round(t.y));
+    }
+    ctx.globalAlpha = 1;
   }
 
   private drawHero(): void {
@@ -405,7 +511,9 @@ export class Sidekick {
     const img = this.sprites.hero.stand[this.facing > 0 ? 'right' : 'left'];
     const w = SPRITE_W * S;
     const h = SPRITE_H * S;
-    ctx.drawImage(img, Math.round(this.x - w / 2), Math.round(this.y - h), w, h);
+    // Recoil: the gun slides back along the aim and he rocks back a pixel or two.
+    const kick = (this.recoil / RECOIL) * 4;
+    ctx.drawImage(img, Math.round(this.x - w / 2 - this.facing * kick * 0.5), Math.round(this.y - h), w, h);
 
     // Rifle, pointed at the target (or slung forward when idle).
     const target = this.current ? this.center(this.current.el) : null;
@@ -417,13 +525,13 @@ export class Sidekick {
     ctx.save();
     ctx.translate(Math.round(o.x), Math.round(o.y));
     ctx.rotate(a);
-    ctx.drawImage(gun, -GUN.pivot[0] * S, -pivotY * S, gun.width * S, gun.height * S);
+    ctx.drawImage(gun, -GUN.pivot[0] * S - Math.round(kick), -pivotY * S, gun.width * S, gun.height * S);
     if (this.muzzleT > 0) {
       const mx = (GUN.muzzle[0] - GUN.pivot[0] + 1) * S;
       const my = ((left ? gun.height - 1 - GUN.muzzle[1] : GUN.muzzle[1]) - pivotY) * S;
       ctx.fillStyle = P.yellow;
-      ctx.fillRect(mx - 2, my - 6, 4, 12);
-      ctx.fillRect(mx - 6, my - 2, 12, 4);
+      ctx.fillRect(mx - 2, my - 8, 4, 16);
+      ctx.fillRect(mx - 4, my - 4, 18, 8);
       ctx.fillStyle = P.white;
       ctx.fillRect(mx - 2, my - 2, 4, 4);
     }

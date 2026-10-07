@@ -181,6 +181,8 @@ export class Enemies {
       e.fireT = e.burst % rounds === 0 ? 2.8 - w.heat * 0.8 : 0.18;
     }
 
+    // Snipers hold their ground: knockback from a hit slides them a little, then friction wins.
+    if (e.kind === 'sniper') e.vx *= Math.exp(-dt * 8);
     e.vy = Math.min(MAX_FALL, e.vy + GRAVITY * dt);
     const blocked = this.moveX(e, e.vx * dt, L);
     if (blocked && e.grounded && e.kind === 'runner') e.vy = -JUMP;

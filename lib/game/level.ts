@@ -198,6 +198,33 @@ export class Level {
     return removed;
   }
 
+  /**
+   * Char the page around a crater with a dithered ring of scorched cells, densest at the rim. Only paints where the
+   * picture still has pixels, so holes stay holes.
+   */
+  scorch(cx: number, cy: number, r: number, strength: number): void {
+    const k = CELL * this.scale;
+    const outer = r * 1.7;
+    const ctx = this.ictx;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.beginPath();
+    const y0 = Math.max(0, Math.floor(cy - outer));
+    const y1 = Math.min(this.pageRows - 1, Math.ceil(cy + outer));
+    const x0 = Math.max(0, Math.floor(cx - outer));
+    const x1 = Math.min(this.w - 1, Math.ceil(cx + outer));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+        if (d < r - 1 || d > outer) continue;
+        if (Math.random() < (1 - (d - r) / (outer - r)) * strength) ctx.rect(Math.floor(x * k), Math.floor(y * k), Math.ceil(k), Math.ceil(k));
+      }
+    }
+    ctx.fillStyle = 'rgba(28,14,10,0.7)';
+    ctx.fill();
+    ctx.restore();
+  }
+
   /** Remove what is left of one element. Adds its cells to the current erase path. */
   private crumble(o: number, k: number, sink?: DebrisSink): number {
     const [x0, y0, x1, y1] = this.box.subarray(o * 4, o * 4 + 4);

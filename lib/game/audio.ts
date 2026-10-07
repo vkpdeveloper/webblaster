@@ -2,6 +2,12 @@
 
 export type ShotSound = 'blaster' | 'smg' | 'shotgun' | 'rocket';
 
+const VOLUME = 0.42;
+/** Major pentatonic steps, so a rising combo always sounds like a tune. */
+const PENTA = [0, 2, 4, 7, 9];
+/** A little random pitch on every repeat keeps rapid fire from sounding like a machine. */
+const vary = (f: number, amount = 0.07) => f * (1 + (Math.random() * 2 - 1) * amount);
+
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -9,6 +15,7 @@ export class Sfx {
   private jetGain: GainNode | null = null;
   private laserOsc: OscillatorNode | null = null;
   private laserGain: GainNode | null = null;
+  private rageGain: GainNode | null = null;
   private last = new Map<string, number>();
   private song: AudioBuffer | null = null;
   private songOut: { src: AudioBufferSourceNode; gain: GainNode; start: number } | null = null;
@@ -21,8 +28,15 @@ export class Sfx {
       const ctx = new AudioContext();
       this.ctx = ctx;
       this.master = ctx.createGain();
-      this.master.gain.value = this.enabled ? 0.32 : 0;
-      this.master.connect(ctx.destination);
+      this.master.gain.value = this.enabled ? VOLUME : 0;
+      // A fast limiter, so a pile of explosions hits hard instead of clipping.
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -16;
+      limiter.knee.value = 8;
+      limiter.ratio.value = 10;
+      limiter.attack.value = 0.002;
+      limiter.release.value = 0.18;
+      this.master.connect(limiter).connect(ctx.destination);
       const len = ctx.sampleRate;
       this.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
       const data = this.noiseBuf.getChannelData(0);
@@ -34,7 +48,7 @@ export class Sfx {
 
   setEnabled(on: boolean): void {
     this.enabled = on;
-    if (this.master && this.ctx) this.master.gain.setTargetAtTime(on ? 0.32 : 0, this.ctx.currentTime, 0.02);
+    if (this.master && this.ctx) this.master.gain.setTargetAtTime(on ? VOLUME : 0, this.ctx.currentTime, 0.02);
   }
 
   close(): void {
@@ -45,35 +59,104 @@ export class Sfx {
 
   shot(kind: ShotSound): void {
     if (!this.ready() || !this.throttle(`shot-${kind}`, 35)) return;
+    // Each shot is a bright crack on top of a short low thump, so it has body as well as bite.
     switch (kind) {
       case 'blaster':
-        this.tone('square', 880, 220, 0.09, 0.22);
+        this.tone('square', vary(880), 200, 0.09, 0.2);
+        this.tone('sine', 150, 45, 0.08, 0.35);
         break;
       case 'smg':
-        this.tone('square', 640, 300, 0.05, 0.14);
-        this.noise(0.04, 0.12, 3000, 'highpass');
+        this.tone('square', vary(640, 0.1), 280, 0.05, 0.13);
+        this.noise(0.04, 0.12, vary(3200), 'highpass');
+        this.tone('sine', vary(130), 50, 0.05, 0.25);
         break;
       case 'shotgun':
-        this.noise(0.22, 0.4, 1800, 'lowpass', 300);
-        this.tone('square', 180, 60, 0.12, 0.2);
+        this.noise(0.28, 0.45, 2200, 'lowpass', 250);
+        this.tone('square', vary(180), 55, 0.14, 0.2);
+        this.tone('sine', 110, 32, 0.22, 0.55);
         break;
       case 'rocket':
-        this.noise(0.35, 0.25, 900, 'bandpass', 300);
-        this.tone('sawtooth', 220, 90, 0.25, 0.12);
+        this.noise(0.4, 0.28, vary(900), 'bandpass', 250);
+        this.tone('sawtooth', vary(220), 80, 0.28, 0.12);
+        this.tone('sine', 90, 35, 0.2, 0.4);
         break;
     }
   }
 
   hit(): void {
     if (!this.ready() || !this.throttle('hit', 45)) return;
-    this.noise(0.05, 0.1, 2400, 'bandpass', 900);
+    this.noise(0.05, 0.12, vary(2400, 0.2), 'bandpass', 900);
   }
 
+  /** An explosion in three layers: a sharp crack, a crunchy body and a long sub-bass tail. */
   boom(radius: number): void {
     if (!this.ready() || !this.throttle('boom', 40)) return;
     const big = Math.min(1, radius / 20);
-    this.noise(0.5 + big * 0.5, 0.55, 1400, 'lowpass', 120);
-    this.tone('sine', 110, 30, 0.4 + big * 0.3, 0.5);
+    this.noise(0.07, 0.5, vary(5000, 0.2), 'highpass');
+    this.noise(0.5 + big * 0.6, 0.6, vary(1600), 'lowpass', 90);
+    this.tone('sine', vary(95), 24, 0.5 + big * 0.5, 0.8);
+    this.tone('triangle', vary(60), 28, 0.3 + big * 0.3, 0.35);
+  }
+
+  /** Bits of the page raining down after a hit. */
+  crunch(cells: number): void {
+    if (!this.ready() || !this.throttle('crunch', 70)) return;
+    const n = Math.min(1, cells / 400);
+    this.noise(0.06 + n * 0.12, 0.08 + n * 0.14, vary(1400, 0.4), 'bandpass', 500);
+  }
+
+  /** A spent shell casing tinkling on the floor. */
+  shell(): void {
+    if (!this.ready() || !this.throttle('shell', 45)) return;
+    const f = vary(3000, 0.25);
+    this.tone('triangle', f, f * 0.94, 0.05, 0.05);
+  }
+
+  /** Crosshair hit marker: a crisp tick that says "that one landed". */
+  hitMarker(kill: boolean): void {
+    if (!this.ready() || !this.throttle('marker', 30)) return;
+    this.tone('square', kill ? 1760 : 1320, kill ? 1760 : 1300, 0.035, 0.06);
+  }
+
+  /** One rising note per combo step, climbing a pentatonic scale. */
+  combo(n: number): void {
+    if (!this.ready() || !this.throttle('combo', 45)) return;
+    // Climb two octaves, then keep cycling the top one so long chains stay musical (and audible).
+    const step = n <= 15 ? n - 1 : 5 + ((n - 6) % 10);
+    const semis = 12 * Math.floor(step / PENTA.length) + PENTA[step % PENTA.length];
+    const f = 523 * 2 ** (semis / 12);
+    this.tone('square', f, f, 0.06, 0.07);
+    this.tone('triangle', f * 2, f * 2, 0.08, 0.05);
+  }
+
+  /** A short fanfare when the combo reaches a new tier. */
+  tier(level: number): void {
+    if (!this.ready()) return;
+    const root = 523 * 2 ** (level / 12);
+    [1, 1.26, 1.5, 2].forEach((m, i) => this.tone('square', root * m, root * m, 0.09, 0.14, i * 0.05));
+    this.tone('sine', 130, 40, 0.3, 0.4);
+  }
+
+  /** Rage mode: a power-up sweep, then a growling drone underneath everything until it runs out. */
+  rage(on: boolean): void {
+    this.rageDrone(on);
+    if (!this.ready()) return;
+    if (on) {
+      this.tone('sawtooth', 110, 880, 0.6, 0.18);
+      this.tone('square', 220, 1760, 0.6, 0.08);
+      this.noise(0.9, 0.35, 300, 'lowpass', 3000);
+    } else {
+      this.tone('sawtooth', 660, 110, 0.5, 0.12);
+    }
+  }
+
+  rageDrone(on: boolean): void {
+    if (this.rageGain && this.ctx) this.rageGain.gain.setTargetAtTime(on ? 0.09 : 0, this.ctx.currentTime, on ? 0.2 : 0.1);
+  }
+
+  rageReady(): void {
+    if (!this.ready()) return;
+    [392, 494, 587, 784, 988].forEach((f, i) => this.tone('square', f, f, 0.07, 0.13, i * 0.045));
   }
 
   crumble(count: number): void {
@@ -89,8 +172,9 @@ export class Sfx {
 
   enemyDie(): void {
     if (!this.ready() || !this.throttle('edie', 50)) return;
-    this.noise(0.25, 0.3, 1800, 'lowpass', 200);
-    this.tone('square', 300, 60, 0.22, 0.12);
+    this.noise(0.3, 0.35, vary(1800), 'lowpass', 160);
+    this.tone('square', vary(300), 60, 0.22, 0.12);
+    this.tone('sine', 120, 35, 0.25, 0.45);
   }
 
   playerDie(): void {
@@ -235,6 +319,28 @@ export class Sfx {
     this.laserOsc.connect(this.laserGain).connect(this.master!);
     this.laserOsc.start();
     lfo.start();
+
+    // Rage drone: two detuned saws through a pulsing low-pass.
+    this.rageGain = ctx.createGain();
+    this.rageGain.gain.value = 0;
+    const rageFilter = ctx.createBiquadFilter();
+    rageFilter.type = 'lowpass';
+    rageFilter.frequency.value = 500;
+    rageFilter.Q.value = 6;
+    const pulse = ctx.createOscillator();
+    pulse.frequency.value = 4;
+    const pulseDepth = ctx.createGain();
+    pulseDepth.gain.value = 350;
+    pulse.connect(pulseDepth).connect(rageFilter.frequency);
+    for (const f of [55, 55.7]) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = f;
+      o.connect(rageFilter);
+      o.start();
+    }
+    rageFilter.connect(this.rageGain).connect(this.master!);
+    pulse.start();
   }
 
   private tone(type: OscillatorType, f0: number, f1: number, dur: number, vol: number, delay = 0): void {

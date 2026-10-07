@@ -31,6 +31,30 @@ const LIVES = 3;
 const INVULN = 2.5;
 const KILL_SCORE = { runner: 500, sniper: 1500 };
 
+// Game feel. Screen shake follows Squirrel Eiserloh's "trauma" model: hits add trauma (0..1), which drains
+// linearly, and the shake is trauma squared, so small hits stay subtle and big ones really rattle.
+const MAX_SHAKE = 18;
+const MAX_ROLL = 0.022;
+const TRAUMA_DECAY = 1.5;
+/** Game speed during slow motion. */
+const SLOW_MO = 0.3;
+/** Destruction within this many seconds keeps a combo alive. */
+const COMBO_WINDOW = 2.2;
+/** Cells blasted that count as one combo step, so image-heavy pages chain too. */
+const CELLS_PER_STEP = 220;
+const COMBO_TIERS: [number, string, string][] = [
+  [10, 'NICE!', P.orange],
+  [25, 'SMASHING!', P.lime],
+  [50, 'DEVASTATING!', P.blue],
+  [100, 'UNSTOPPABLE!', P.pink],
+  [200, 'ANNIHILATION!', P.red],
+  [400, 'GODLIKE!', P.yellow],
+];
+const MULTI_KILL = ['', '', 'DOUBLE KILL!', 'TRIPLE KILL!', 'MULTI KILL!', 'MEGA KILL!'];
+/** Rage gained per combo step: a full bar takes roughly 15-25 seconds of steady mayhem. */
+const RAGE_PER_STEP = 0.005;
+const RAGE_TIME = 10;
+
 const MILESTONES: [number, string, string][] = [
   [0.25, '25% WRECKED', 'KEEP BLASTING'],
   [0.5, 'HALF GONE!', 'THE PAGE IS CRUMBLING'],
@@ -77,8 +101,21 @@ export class Game {
   private dpr = 1;
   private camX = 0;
   private camY = 0;
-  private shake = 0;
   private flash = 0;
+  /** Screen shake trauma, 0..1. */
+  private trauma = 0;
+  /** Camera kicked back against the aim, in CSS px. */
+  private kickX = 0;
+  private kickY = 0;
+  /** Hitstop: real seconds the action stays frozen. */
+  private freeze = 0;
+  private lastFreeze = -1;
+  /** Real seconds of slow motion left. */
+  private slow = 0;
+  /** Real time, which keeps running through hitstop and slow motion. */
+  private realT = 0;
+  /** Respect the OS "reduce motion" setting: gentler shake and flashes. */
+  private readonly calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // Player, in cells.
   private px = 0;
@@ -118,7 +155,16 @@ export class Game {
   /** NES-style explosion animations. */
   private booms: { x: number; y: number; scale: number; t: number }[] = [];
   /** Floating score numbers. */
-  private popups: { x: number; y: number; text: string; t: number; color: string }[] = [];
+  private popups: { x: number; y: number; text: string; t: number; color: string; big?: boolean }[] = [];
+  /** White impact frames at the point of a hit. */
+  private flashes: { x: number; y: number; r: number; t: number }[] = [];
+  /** Defeated soldiers, flung off the page. */
+  private corpses: { x: number; y: number; vx: number; vy: number; rot: number; spin: number; t: number; img: HTMLCanvasElement }[] = [];
+  /** Crosshair hit marker: real seconds left, and whether it was a kill. */
+  private hitMark = 0;
+  private hitKill = false;
+  /** Crosshair spread after a shot, in CSS px. */
+  private crossKick = 0;
   private muzzleT = 0;
   private readonly stars = Array.from({ length: 160 }, () => ({ x: Math.random(), y: Math.random(), z: 0.15 + Math.random() * 0.5, tw: Math.random() * 6 }));
 
@@ -128,7 +174,18 @@ export class Game {
   private deathT = 0;
   private invuln = 0;
   private killScore = 0;
+  /** Score from combo multipliers. */
+  private bonus = 0;
   private gameOver = false;
+  private combo = 0;
+  private comboT = 0;
+  private comboTier = -1;
+  private comboCells = 0;
+  private bestCombo = 0;
+  private rage = 0;
+  private rageReady = false;
+  /** Seconds of rage mode left. */
+  private raging = 0;
 
   private time = 0;
   private nextMilestone = 0;
@@ -175,8 +232,9 @@ export class Game {
       shotBlocked: (x, y) => this.parts.burst(x, y, 3, Kind.Spark, [P.red, P.white], 60, 0.15),
     });
     this.debris = (x, y, color) => {
-      const life = rand(0.7, 1.6);
-      this.parts.add({ x, y, vx: rand(-90, 90), vy: rand(-200, -20), life, max: life, color, size: 1, kind: Kind.Debris });
+      // Debris piles up and lingers a while; the odd bigger chunk gives it weight.
+      const life = rand(1.2, 3.2);
+      this.parts.add({ x, y, vx: rand(-90, 90), vy: rand(-200, -20), life, max: life, color, size: Math.random() < 0.15 ? 2 : 1, kind: Kind.Debris });
     };
 
     (document.activeElement as HTMLElement | null)?.blur?.();
@@ -209,12 +267,22 @@ export class Game {
     this.rings = [];
     this.booms = [];
     this.popups = [];
+    this.flashes = [];
+    this.corpses = [];
     this.enemies.clear();
     this.lives = LIVES;
     this.dead = false;
     this.gameOver = false;
     this.invuln = INVULN;
     this.killScore = 0;
+    this.bonus = 0;
+    this.combo = this.comboT = this.comboCells = this.bestCombo = 0;
+    this.comboTier = -1;
+    this.hud.setCombo(0, 1, P.white);
+    if (this.raging > 0) this.sfx.rage(false);
+    this.rage = this.raging = 0;
+    this.rageReady = false;
+    this.trauma = this.kickX = this.kickY = this.freeze = this.slow = 0;
     this.balled = false;
     this.time = 0;
     this.nextMilestone = 0;
@@ -344,6 +412,9 @@ export class Game {
       case 'KeyM':
         this.toggleSound();
         break;
+      case 'KeyF':
+        this.unleashRage();
+        break;
       default:
         if (/^Digit[1-9]$/.test(e.code)) {
           const i = Number(e.code.slice(5)) - 1;
@@ -375,6 +446,7 @@ export class Game {
     this.fireHeld = false;
     this.sfx.jet(false);
     this.sfx.laser(false);
+    this.sfx.rageDrone(false);
     if (this.paused) return;
     this.paused = true;
     this.menuItems = [
@@ -391,6 +463,7 @@ export class Game {
   private resume(): void {
     this.hud.closeMenu();
     this.paused = false;
+    this.sfx.rageDrone(this.raging > 0);
     this.last = performance.now();
   }
 
@@ -400,6 +473,7 @@ export class Game {
     this.keys.clear();
     this.sfx.jet(false);
     this.sfx.laser(false);
+    this.sfx.rageDrone(false);
     this.sfx.win();
     this.reportStats(true);
     this.menuItems = [
@@ -415,6 +489,7 @@ export class Game {
         ['WRECKED', `${Math.floor(this.level.destroyed * 100)}%`],
         ['TIME', `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`],
         ['SCORE', this.score().toLocaleString()],
+        ['BEST COMBO', `x${this.bestCombo}`],
         ['SHOTS', this.shotsFired.toLocaleString()],
         ['PIXELS', (this.cellsBlasted * CELL * CELL).toLocaleString()],
       ],
@@ -474,6 +549,7 @@ export class Game {
     this.fireHeld = false;
     this.sfx.jet(false);
     this.sfx.laser(false);
+    this.sfx.rageDrone(false);
     this.reportStats();
     this.menuItems = [
       { act: 'continue', label: 'CONTINUE' },
@@ -482,12 +558,13 @@ export class Game {
     ];
     this.hud.openMenu('GAME OVER', this.menuItems, [
       ['SCORE', this.score().toLocaleString()],
+      ['BEST COMBO', `x${this.bestCombo}`],
       ['WRECKED', `${Math.floor(this.level.destroyed * 100)}%`],
     ]);
   }
 
   private score(): number {
-    return this.killScore + this.cellsBlasted;
+    return this.killScore + this.cellsBlasted + this.bonus;
   }
 
   private toggleSound(): void {
@@ -514,13 +591,25 @@ export class Game {
     const dt = Math.min(0.05, (t - this.last) / 1000);
     this.last = t;
     if (!this.paused) {
-      this.acc += dt;
-      let n = 0;
-      while (this.acc >= STEP && n++ < 8) {
-        this.update(STEP);
-        this.acc -= STEP;
+      // Shake, camera kick and the crosshair run on real time, so they keep moving through a hitstop.
+      this.realT += dt;
+      this.trauma = Math.max(0, this.trauma - dt * TRAUMA_DECAY);
+      const settle = Math.exp(-dt * 18);
+      this.kickX *= settle;
+      this.kickY *= settle;
+      this.crossKick *= Math.exp(-dt * 14);
+      this.hitMark -= dt;
+      if (this.freeze > 0) this.freeze -= dt;
+      else {
+        this.slow = Math.max(0, this.slow - dt);
+        this.acc += this.slow > 0 ? dt * SLOW_MO : dt;
+        let n = 0;
+        while (this.acc >= STEP && n++ < 8) {
+          this.update(STEP);
+          this.acc -= STEP;
+        }
+        if (n >= 8) this.acc = 0;
       }
-      if (n >= 8) this.acc = 0;
     }
     this.render();
     // Recording builds only: expose state so a scripted player can aim (stripped from production).
@@ -538,6 +627,10 @@ export class Game {
         score: this.score(),
         lives: this.lives,
         paused: this.paused,
+        combo: this.combo,
+        best: this.bestCombo,
+        rage: this.rage,
+        raging: this.raging,
       });
     }
   };
@@ -562,14 +655,26 @@ export class Game {
       pp.t += dt;
       pp.y -= dt * 18;
     }
-    this.popups = this.popups.filter((pp) => pp.t < 0.9);
+    this.popups = this.popups.filter((pp) => pp.t < (pp.big ? 1.2 : 0.9));
+    for (const f of this.flashes) f.t += dt;
+    this.flashes = this.flashes.filter((f) => f.t < 0.06);
+    for (const c of this.corpses) {
+      c.t += dt;
+      c.vy = Math.min(MAX_FALL * 1.5, c.vy + GRAVITY * dt);
+      c.x += c.vx * dt;
+      c.y += c.vy * dt;
+      c.rot += c.spin * dt;
+    }
+    this.corpses = this.corpses.filter((c) => c.t < 2.5);
+    if (this.parts.clinks) this.sfx.shell();
+    this.updateCombo(dt);
+    this.updateRage(dt);
     for (const g of this.rings) {
       g.r += (g.max - g.r) * Math.min(1, dt * 12);
       g.life -= dt;
     }
     this.rings = this.rings.filter((g) => g.life > 0);
     this.updateCamera(dt);
-    this.shake = Math.max(0, this.shake - dt * 30);
     this.flash = Math.max(0, this.flash - dt * 2.5);
 
     const p = this.level.destroyed;
@@ -666,7 +771,7 @@ export class Game {
   }
 
   private die(): void {
-    if (this.dead || this.invuln > 0) return;
+    if (this.dead || this.invuln > 0 || this.raging > 0) return;
     this.dead = true;
     this.deathT = 1.4;
     this.lives--;
@@ -678,7 +783,9 @@ export class Game {
     this.sfx.jet(false);
     this.sfx.laser(false);
     this.sfx.playerDie();
-    this.shake = Math.max(this.shake, 10);
+    this.shakeTo(12, 0.2);
+    this.hitstop(0.12);
+    this.endCombo();
     this.flash = Math.max(this.flash, 0.25);
     this.parts.burst(this.px + PW / 2, this.py + PH / 2, 30, Kind.Spark, [P.red, P.peach, P.white], 160, 0.6);
   }
@@ -720,19 +827,46 @@ export class Game {
     if (this.enemies.hits(hb.x, hb.y, hb.w, hb.h) || touched) this.die();
   }
 
-  private damage(e: Enemy, amount: number): void {
+  /** Hurt an enemy; `dx`, `dy` is the direction the hit came from. Returns true if it died. */
+  private damage(e: Enemy, amount: number, dx = 0, dy = 0): boolean {
+    if (e.hp <= 0) return false;
     e.hp -= amount;
     e.hitT = 0.08;
-    if (e.hp > 0) return;
     const cx = e.x + EW / 2;
     const cy = e.y + EH / 2;
-    const points = KILL_SCORE[e.kind];
+    this.hitMark = 0.14;
+    this.hitKill = e.hp <= 0;
+    if (e.hp > 0) {
+      e.vx += dx * 90;
+      this.parts.spray(cx, cy, 6, Kind.Spark, [P.white, P.red], 140, 0.2, Math.atan2(dy, dx), 0.6);
+      this.sfx.hitMarker(false);
+      return false;
+    }
+    const points = KILL_SCORE[e.kind] * this.mult();
     this.killScore += points;
-    this.booms.push({ x: cx, y: cy, scale: e.kind === 'sniper' ? 1.6 : 1.2, t: 0 });
-    this.popups.push({ x: cx, y: e.y, text: String(points), t: 0, color: e.kind === 'sniper' ? P.yellow : P.white });
+    this.booms.push({ x: cx, y: cy, scale: e.kind === 'sniper' ? 1.2 : 0.9, t: 0 });
+    this.flashes.push({ x: cx, y: cy, r: 12, t: 0 });
+    this.popups.push({ x: cx, y: e.y, text: String(points), t: 0, color: e.kind === 'sniper' ? P.yellow : P.white, big: true });
     this.parts.burst(cx, cy, 26, Kind.Debris, [P.slate, P.lavender, P.peach, P.red], 140, 1.2);
-    this.shake = Math.max(this.shake, 4);
+    this.parts.spray(cx, cy, 14, Kind.Spark, [P.white, P.yellow, P.red], 260, 0.35, Math.atan2(dy, dx), 0.5);
+    // Flung off the page, spinning, the way arcade soldiers go.
+    const dir = dx || (Math.random() < 0.5 ? -1 : 1);
+    this.corpses.push({
+      x: cx,
+      y: cy,
+      vx: Math.sign(dir) * rand(110, 190) + dx * 60,
+      vy: -rand(170, 250) + dy * 40,
+      rot: 0,
+      spin: rand(9, 15) * Math.sign(dir),
+      t: 0,
+      img: this.sprites.soldier.air[e.facing > 0 ? 'right' : 'left'],
+    });
+    this.shakeTo(7);
+    this.hitstop(e.kind === 'sniper' ? 0.07 : 0.05);
     this.sfx.enemyDie();
+    this.sfx.hitMarker(true);
+    this.bump(3);
+    return true;
   }
 
   private moveX(dx: number): void {
@@ -811,6 +945,7 @@ export class Game {
 
   private updateWeapons(dt: number): void {
     const w = WEAPONS[this.weapon];
+    const rage = this.raging > 0;
     const { ox, oy, dx, dy } = this.aim();
     if (Math.abs(dx) > 0.05) this.facing = dx > 0 ? 1 : -1;
     const { x: mx, y: my } = this.balled ? { x: this.px + PW / 2 + dx * 9, y: this.py + PH / 2 + dy * 9 } : this.muzzle(ox, oy, dx, dy);
@@ -827,35 +962,58 @@ export class Game {
           const e = this.enemies.at(mx + dx * d, my + dy * d);
           if (e) struck.add(e);
         }
-        for (const e of struck) this.damage(e, 1);
+        for (const e of struck) this.damage(e, 1, dx, dy);
       }
       this.beam = { x0: mx, y0: my, x1: end.x, y1: end.y };
       this.laserTick -= dt;
       if (hit && this.laserTick <= 0) {
         this.laserTick = 1 / 45;
         this.shotsFired++;
-        this.impact(hit.x + dx, hit.y + dy, w.radius, w.color);
-        this.shake = Math.max(this.shake, w.shake);
+        this.impact(hit.x + dx, hit.y + dy, w.radius * (rage ? 1.6 : 1), w.color, dx, dy);
+        this.shakeTo(w.shake * (rage ? 2 : 1));
+        this.kickX -= dx * w.kick;
+        this.kickY -= dy * w.kick;
       }
       this.sfx.laser(true);
     } else {
       this.sfx.laser(false);
       this.fireQueued -= dt;
       if ((this.fireHeld || this.fireQueued > 0) && this.cooldown <= 0 && w.kind !== 'laser') {
-        this.cooldown = w.cooldown;
+        // Rage mode: twice the fire rate, bigger holes, a wider fan.
+        this.cooldown = w.cooldown * (rage ? 0.45 : 1);
         this.fireQueued = 0;
         const base = Math.atan2(dy, dx);
-        for (let i = 0; i < w.pellets; i++) {
-          const a = base + (w.fan && w.pellets > 1 ? -w.spread + (2 * w.spread * i) / (w.pellets - 1) : rand(-w.spread, w.spread));
+        const pellets = w.pellets + (rage && w.fan ? 4 : 0);
+        const spread = w.spread * (rage && w.fan ? 1.4 : 1);
+        for (let i = 0; i < pellets; i++) {
+          const a = base + (w.fan && pellets > 1 ? -spread + (2 * spread * i) / (pellets - 1) : rand(-spread, spread));
           const v = w.speed * rand(0.9, 1.1);
-          this.shots.push({ x: mx, y: my, px: mx, py: my, vx: Math.cos(a) * v, vy: Math.sin(a) * v, kind: w.kind, life: w.life, radius: w.radius, color: w.color });
+          this.shots.push({ x: mx, y: my, px: mx, py: my, vx: Math.cos(a) * v, vy: Math.sin(a) * v, kind: w.kind, life: w.life, radius: w.radius * (rage ? 1.6 : 1), color: w.color });
         }
         this.shotsFired++;
         this.muzzleT = 0.05;
         this.vx -= dx * w.recoil;
         if (!this.grounded) this.vy -= dy * w.recoil * 0.8;
-        this.shake = Math.max(this.shake, w.shake);
-        this.parts.burst(mx, my, 5, Kind.Spark, [P.white, P.yellow, w.color], 90, 0.12);
+        this.shakeTo(w.shake * (rage ? 1.5 : 1));
+        this.kickX = clamp(this.kickX - dx * w.kick, -14, 14);
+        this.kickY = clamp(this.kickY - dy * w.kick, -14, 14);
+        this.crossKick = Math.min(10, this.crossKick + w.kick + 1.5);
+        this.parts.spray(mx, my, 6, Kind.Spark, [P.white, P.yellow, w.color], 150, 0.12, base, 0.5);
+        if (w.kind === 'bullet') {
+          // Spent brass flicks out of the gun and clinks around the floor.
+          const life = rand(4, 7);
+          this.parts.add({
+            x: ox,
+            y: oy - 1,
+            vx: -this.facing * rand(25, 70) + this.vx * 0.3,
+            vy: rand(-170, -110),
+            life,
+            max: life,
+            color: w.id === 'spread' ? P.red : Math.random() < 0.5 ? P.orange : P.yellow,
+            size: 1,
+            kind: Kind.Shell,
+          });
+        }
         if (w.sound) this.sfx.shot(w.sound);
       }
     }
@@ -863,7 +1021,7 @@ export class Game {
     if (this.nadeQueued) {
       this.nadeQueued = false;
       if (this.nadeCooldown <= 0) {
-        this.nadeCooldown = GRENADE.cooldown;
+        this.nadeCooldown = rage ? 0.12 : GRENADE.cooldown;
         this.shots.push({
           x: mx,
           y: my,
@@ -873,7 +1031,7 @@ export class Game {
           vy: dy * GRENADE.speed + this.vy * 0.3 - 40,
           kind: 'grenade',
           life: GRENADE.fuse,
-          radius: GRENADE.radius,
+          radius: GRENADE.radius * (rage ? 1.3 : 1),
           color: P.lime,
         });
         this.shotsFired++;
@@ -899,8 +1057,8 @@ export class Game {
         if (foe) {
           if (s.kind === 'rocket') this.explode(nx, ny, s.radius);
           else {
-            this.damage(foe, 1);
-            this.parts.burst(nx, ny, 5, Kind.Spark, [P.white, P.red], 100, 0.2);
+            const v = Math.hypot(s.vx, s.vy) || 1;
+            this.damage(foe, 1, s.vx / v, s.vy / v);
           }
           dead = true;
           break;
@@ -920,7 +1078,10 @@ export class Game {
           break;
         }
         if (s.kind === 'rocket') this.explode(nx, ny, s.radius);
-        else this.impact(nx, ny, s.radius, s.color);
+        else {
+          const v = Math.hypot(s.vx, s.vy) || 1;
+          this.impact(nx, ny, s.radius, s.color, s.vx / v, s.vy / v);
+        }
         dead = true;
         break;
       }
@@ -941,43 +1102,77 @@ export class Game {
   }
 
   private blast(x: number, y: number, r: number, debris: DebrisSink, chance: number): void {
-    this.cellsBlasted += this.level.carve(x, y, r, debris, chance);
-    if (!this.level.crumbled) return;
+    const removed = this.level.carve(x, y, r, debris, chance);
+    this.cellsBlasted += removed;
+    this.bonus += removed * (this.mult() - 1);
+    if (removed > 40) this.sfx.crunch(removed);
+    // Every element that gives way, and every chunk of page, keeps the combo going.
+    this.comboCells += removed;
+    let steps = this.level.crumbled + Math.floor(this.comboCells / CELLS_PER_STEP);
+    this.comboCells %= CELLS_PER_STEP;
+    if (!this.level.crumbled) {
+      if (steps) this.bump(steps);
+      return;
+    }
     this.sfx.crumble(this.level.crumbled);
     for (const c of this.level.collapses) {
       if (c.cells < 1500) continue;
       // A whole image or card just gave way.
       const size = Math.min(60, Math.sqrt(c.cells) / 2);
+      steps += 2;
       this.rings.push({ x: c.x, y: c.y, r: size * 0.3, max: size * 2.2, life: 0.5, color: P.peach });
       this.booms.push({ x: c.x, y: c.y, scale: size / 8, t: 0 });
+      this.flashes.push({ x: c.x, y: c.y, r: size * 1.2, t: 0 });
       this.parts.burst(c.x, c.y, 30, Kind.Smoke, SMOKE, size * 4, 1.6, 4);
-      this.shake = Math.max(this.shake, 14);
+      this.shakeTo(14, 0.15);
       this.flash = Math.max(this.flash, 0.2);
       this.sfx.boom(size);
+      this.hitstop(0.06);
+      // Something really big came down: let it sink in.
+      if (c.cells > 20000) this.slowMo(0.5);
     }
+    this.bump(steps);
   }
 
-  private impact(x: number, y: number, r: number, color: string): void {
+  /** A bullet or laser hit, travelling along `dx`, `dy`. */
+  private impact(x: number, y: number, r: number, color: string, dx: number, dy: number): void {
     const L = this.level;
     if (!L.isBedrock(Math.floor(y))) {
       this.blast(x, y, r, this.debris, Math.min(1, 14 / (r * r)));
+      L.scorch(x, y, r, 0.45);
     }
-    this.parts.burst(x, y, 6, Kind.Spark, [color, P.white], 120, 0.25);
+    // Sparks kick back toward the shooter.
+    this.parts.spray(x, y, 7, Kind.Spark, [color, P.white, P.yellow], 160, 0.25, Math.atan2(-dy, -dx), 0.9);
+    this.flashes.push({ x, y, r: r * 0.9, t: 0 });
     this.sfx.hit();
   }
 
   private explode(x: number, y: number, r: number): void {
     this.blast(x, y, r, this.debris, Math.min(1, 220 / (Math.PI * r * r)));
+    this.level.scorch(x, y, r, 0.9);
+    this.flashes.push({ x, y, r: r * 1.3, t: 0 });
     this.parts.burst(x, y, 50, Kind.Fire, FIRE, r * 10, 0.55, 2);
     this.parts.burst(x, y, 14, Kind.Fire, FIRE, r * 5, 0.9, 4);
     this.parts.burst(x, y, 16, Kind.Smoke, SMOKE, r * 3, 1.4, 3);
     this.parts.burst(x, y, 24, Kind.Spark, [P.yellow, P.white, P.orange], r * 16, 0.5);
-    this.shake = Math.max(this.shake, Math.min(18, r * 0.7));
+    this.shakeTo(Math.min(18, r * 0.7), 0.12);
+    this.hitstop(0.03);
     this.flash = Math.max(this.flash, Math.min(0.35, r / 60));
     this.rings.push({ x, y, r: r * 0.4, max: r * 2.6, life: 0.35, color: P.white }, { x, y, r: r * 0.2, max: r * 1.7, life: 0.45, color: P.yellow });
     this.booms.push({ x, y, scale: r / 9, t: 0 });
     this.sfx.boom(r);
-    for (const e of this.enemies.within(x, y, r * 1.2)) this.damage(e, 3);
+    let killed = 0;
+    for (const e of this.enemies.within(x, y, r * 1.2)) {
+      const ex = e.x + EW / 2 - x;
+      const ey = e.y + EH / 2 - y;
+      const d = Math.hypot(ex, ey) || 1;
+      if (this.damage(e, 3, ex / d, ey / d)) killed++;
+    }
+    if (killed >= 2) {
+      this.hud.callout(MULTI_KILL[Math.min(MULTI_KILL.length - 1, killed)], P.red);
+      this.sfx.tier(killed * 2);
+      this.slowMo(0.6);
+    }
 
     const cx = this.px + PW / 2;
     const cy = this.py + PH / 2;
@@ -995,6 +1190,127 @@ export class Game {
     for (const s of this.shots) {
       if (s.kind !== 'bullet' && s.life > 0.05 && Math.hypot(s.x - x, s.y - y) < r * 1.2) s.life = 0.04;
     }
+  }
+
+  // ---- game feel ----
+
+  /** Shake the screen at least this hard (in px at its peak), plus optional extra trauma that stacks. */
+  private shakeTo(px: number, extra = 0): void {
+    this.trauma = Math.min(1, Math.max(this.trauma, Math.sqrt(Math.min(1, px / MAX_SHAKE))) + extra);
+  }
+
+  /**
+   * Freeze the action for a moment on a big hit, so it lands. Short freezes only count when they're rare:
+   * back to back they turn into stutter.
+   */
+  private hitstop(s: number): void {
+    if (this.realT - this.lastFreeze < 0.25 && s < 0.08) return;
+    this.freeze = Math.max(this.freeze, s);
+    this.lastFreeze = this.realT;
+  }
+
+  private slowMo(s: number): void {
+    this.slow = Math.max(this.slow, s);
+  }
+
+  /** Smooth noise in about -1..1 for the shake: layered sines instead of a fresh random jump every frame. */
+  private wobble(seed: number): number {
+    const t = this.realT * 30;
+    return Math.sin(t + seed * 12.9) * 0.5 + Math.sin(t * 2.13 + seed * 78.2) * 0.3 + Math.sin(t * 4.37 + seed * 37.7) * 0.2;
+  }
+
+  private mult(): number {
+    return 1 + Math.min(7, Math.floor(this.combo / 10));
+  }
+
+  private comboColor(): string {
+    return this.comboTier >= 0 ? COMBO_TIERS[this.comboTier][2] : P.yellow;
+  }
+
+  /** Grow the combo by `n` steps. Each step fills the rage bar a bit and plays the next note up the scale. */
+  private bump(n: number): void {
+    if (n <= 0) return;
+    this.combo += n;
+    this.comboT = COMBO_WINDOW;
+    this.bestCombo = Math.max(this.bestCombo, this.combo);
+    this.sfx.combo(this.combo);
+    let tier = -1;
+    for (let i = 0; i < COMBO_TIERS.length; i++) if (this.combo >= COMBO_TIERS[i][0]) tier = i;
+    if (tier > this.comboTier) {
+      this.comboTier = tier;
+      this.hud.callout(COMBO_TIERS[tier][1], COMBO_TIERS[tier][2]);
+      this.sfx.tier(tier * 2);
+      this.shakeTo(6);
+    }
+    this.hud.setCombo(this.combo, this.mult(), this.comboColor());
+    if (this.raging > 0 || this.rageReady) return;
+    this.rage = Math.min(1, this.rage + n * RAGE_PER_STEP);
+    if (this.rage >= 1) {
+      this.rageReady = true;
+      this.hud.callout('RAGE READY! PRESS F', P.red);
+      this.sfx.rageReady();
+    }
+  }
+
+  private updateCombo(dt: number): void {
+    if (this.comboT <= 0) return;
+    this.comboT -= dt;
+    this.hud.setComboFuse(Math.max(0, this.comboT / COMBO_WINDOW));
+    if (this.comboT <= 0) this.endCombo();
+  }
+
+  private endCombo(): void {
+    if (this.combo >= 10) {
+      this.popups.push({ x: this.px + PW / 2, y: this.py - 6, text: `COMBO x${this.combo}`, t: 0, color: this.comboColor(), big: true });
+    }
+    this.combo = this.comboT = this.comboCells = 0;
+    this.comboTier = -1;
+    this.hud.setCombo(0, 1, P.white);
+  }
+
+  /** Rage mode: everything hits harder and faster, nothing can touch you, and the page has nowhere to hide. */
+  private unleashRage(): void {
+    if (!this.rageReady || this.dead || this.paused) return;
+    this.rageReady = false;
+    this.raging = RAGE_TIME;
+    const cx = this.px + PW / 2;
+    const cy = this.py + PH / 2;
+    this.sfx.rage(true);
+    this.shakeTo(MAX_SHAKE, 1);
+    this.hitstop(0.12);
+    this.slowMo(0.7);
+    this.flash = Math.max(this.flash, 0.5);
+    // A shockwave that clears the ground around you.
+    this.explode(cx, cy, 34);
+    this.vy = Math.min(this.vy, -120);
+    for (let i = 0; i < 3; i++) this.rings.push({ x: cx, y: cy, r: 6 + i * 6, max: 90 + i * 40, life: 0.5 + i * 0.15, color: [P.red, P.orange, P.yellow][i] });
+    for (const e of this.enemies.within(cx, cy, 90)) {
+      const ex = e.x + EW / 2 - cx;
+      const ey = e.y + EH / 2 - cy;
+      const d = Math.hypot(ex, ey) || 1;
+      this.damage(e, 99, ex / d, ey / d);
+    }
+    this.hud.callout('RAGE MODE!!', P.red);
+  }
+
+  private updateRage(dt: number): void {
+    if (this.raging > 0) {
+      this.raging -= dt;
+      this.fuel = FUEL_MAX;
+      this.rage = Math.max(0, this.raging / RAGE_TIME);
+      // Burning aura.
+      if (!this.dead && Math.random() < 0.6) {
+        const life = rand(0.2, 0.45);
+        this.parts.add({ x: this.px + rand(0, PW), y: this.py + rand(4, PH), vx: rand(-20, 20), vy: rand(-90, -40), life, max: life, color: FIRE[(Math.random() * 4) | 0], size: 1, kind: Kind.Fire });
+      }
+      if (this.raging <= 0) {
+        this.raging = this.rage = 0;
+        this.invuln = Math.max(this.invuln, 0.8);
+        this.sfx.rage(false);
+        this.hud.callout('RAGE OVER', P.lavender);
+      }
+    }
+    this.hud.setRage(this.rage, this.rageReady, this.raging > 0);
   }
 
   private updateCamera(dt: number): void {
@@ -1019,13 +1335,18 @@ export class Game {
     const camY = Math.round(this.camY);
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    const sx = Math.round(rand(-1, 1) * this.shake);
-    const sy = Math.round(rand(-1, 1) * this.shake);
-    ctx.translate(sx, sy);
+    const shake = this.trauma ** 2 * MAX_SHAKE * (this.calm ? 0.25 : 1);
+    const sx = Math.round(this.wobble(1) * shake + this.kickX);
+    const sy = Math.round(this.wobble(2) * shake + this.kickY);
+    // A touch of roll on the biggest hits: translation plus rotation is what makes 2D shake feel violent.
+    const roll = this.calm ? 0 : this.trauma ** 3 * MAX_ROLL * this.wobble(3);
+    ctx.translate(vw / 2 + sx, vh / 2 + sy);
+    ctx.rotate(roll);
+    ctx.translate(-vw / 2, -vh / 2);
 
     this.voidPat.setTransform(new DOMMatrix().translate(-camX * 0.5, -camY * 0.5));
     ctx.fillStyle = this.voidPat;
-    ctx.fillRect(-20, -20, vw + 40, vh + 40);
+    ctx.fillRect(-60, -60, vw + 120, vh + 120);
     // Parallax starfield, visible through every hole blasted in the page.
     for (const st of this.stars) {
       const x = (((st.x * vw - camX * st.z) % vw) + vw) % vw;
@@ -1054,6 +1375,14 @@ export class Game {
     }
 
     if (this.settings.enemies) this.enemies.draw(ctx, this.sprites, CELL, camX, camY, this.time);
+    for (const c of this.corpses) {
+      ctx.save();
+      ctx.translate(Math.round(c.x * CELL - camX), Math.round(c.y * CELL - camY));
+      ctx.rotate(Math.round(c.rot / (Math.PI / 4)) * (Math.PI / 4));
+      if (c.t < 0.08) ctx.filter = 'brightness(4)';
+      ctx.drawImage(c.img, (-c.img.width * CELL) / 2, (-c.img.height * CELL) / 2, c.img.width * CELL, c.img.height * CELL);
+      ctx.restore();
+    }
     for (const shot of this.shots) this.drawShot(shot, camX, camY);
     if (this.beam) this.drawBeam(camX, camY);
     this.drawPlayer(camX, camY);
@@ -1063,12 +1392,28 @@ export class Game {
       const size = img.width * CELL * b.scale;
       ctx.drawImage(img, Math.round(b.x * CELL - camX - size / 2), Math.round(b.y * CELL - camY - size / 2), size, size);
     }
-    ctx.font = '10px WBPixel, monospace';
+    // Impact frames: a white-hot disc for the first instant of a hit, then a ring.
+    for (const f of this.flashes) {
+      ctx.beginPath();
+      ctx.arc(f.x * CELL - camX, f.y * CELL - camY, f.r * CELL * (f.t < 0.03 ? 1 : 1.3), 0, Math.PI * 2);
+      if (f.t < 0.03) {
+        ctx.fillStyle = P.white;
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = P.yellow;
+        ctx.lineWidth = CELL * 2;
+        ctx.stroke();
+      }
+    }
     ctx.textAlign = 'center';
     for (const pp of this.popups) {
-      if (pp.t > 0.6 && Math.floor(pp.t * 20) % 2) continue;
+      const end = pp.big ? 0.9 : 0.6;
+      if (pp.t > end && Math.floor(pp.t * 20) % 2) continue;
       const x = Math.round(pp.x * CELL - camX);
       const y = Math.round(pp.y * CELL - camY);
+      // Big popups slam in oversized, then settle.
+      const size = pp.big ? Math.round(14 * (pp.t < 0.12 ? 1.8 - pp.t * 6.6 : 1)) : 10;
+      ctx.font = `${size}px WBPixel, monospace`;
       ctx.fillStyle = P.black;
       ctx.fillText(pp.text, x + 2, y + 2);
       ctx.fillStyle = pp.color;
@@ -1085,8 +1430,17 @@ export class Game {
     ctx.globalAlpha = 1;
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    if (this.raging > 0) {
+      // Pulsing red edges while raging.
+      const pulse = 0.35 + 0.15 * Math.sin(this.realT * 9);
+      const g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.35, vw / 2, vh / 2, Math.max(vw, vh) * 0.75);
+      g.addColorStop(0, 'rgba(255,0,77,0)');
+      g.addColorStop(1, `rgba(255,0,77,${pulse})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, vw, vh);
+    }
     if (this.flash > 0) {
-      ctx.fillStyle = `rgba(255,241,232,${this.flash})`;
+      ctx.fillStyle = `rgba(255,241,232,${this.flash * (this.calm ? 0.4 : 1)})`;
       ctx.fillRect(0, 0, vw, vh);
     }
     if (!this.hud.menuOpen) this.drawCrosshair();
@@ -1139,8 +1493,8 @@ export class Game {
 
   private drawPlayer(camX: number, camY: number): void {
     const ctx = this.ctx;
-    // Blink while invulnerable after a respawn.
-    if (this.invuln > 0 && !this.dead && Math.floor(this.invuln * 16) % 2) return;
+    // Blink while invulnerable after a respawn (rage makes you invulnerable too, but you stay solid).
+    if (this.invuln > 0 && this.raging <= 0 && !this.dead && Math.floor(this.invuln * 16) % 2) return;
     if (this.dead && this.deathT < 0.5 && Math.floor(this.deathT * 20) % 2) return;
 
     if (this.balled || this.dead) {
@@ -1204,16 +1558,25 @@ export class Game {
     const ctx = this.ctx;
     const x = Math.round(this.mouseX);
     const y = Math.round(this.mouseY);
+    // The arms spread with every shot and pull back in.
+    const k = Math.round(this.crossKick);
     const arms = (c: string, g: number) => {
       ctx.fillStyle = c;
-      ctx.fillRect(x - 9 - g, y - 1 - g, 6 + g * 2, 2 + g * 2);
-      ctx.fillRect(x + 3 - g, y - 1 - g, 6 + g * 2, 2 + g * 2);
-      ctx.fillRect(x - 1 - g, y - 9 - g, 2 + g * 2, 6 + g * 2);
-      ctx.fillRect(x - 1 - g, y + 3 - g, 2 + g * 2, 6 + g * 2);
+      ctx.fillRect(x - 9 - k - g, y - 1 - g, 6 + g * 2, 2 + g * 2);
+      ctx.fillRect(x + 3 + k - g, y - 1 - g, 6 + g * 2, 2 + g * 2);
+      ctx.fillRect(x - 1 - g, y - 9 - k - g, 2 + g * 2, 6 + g * 2);
+      ctx.fillRect(x - 1 - g, y + 3 + k - g, 2 + g * 2, 6 + g * 2);
     };
     arms(P.black, 1);
-    arms(P.white, 0);
+    arms(this.raging > 0 ? P.orange : P.white, 0);
     ctx.fillStyle = P.red;
     ctx.fillRect(x - 1, y - 1, 2, 2);
+    if (this.hitMark > 0) {
+      // Hit marker: four diagonal ticks, red on a kill.
+      ctx.fillStyle = this.hitKill ? P.red : P.white;
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        for (let i = 0; i < 4; i++) ctx.fillRect(x + sx * (5 + i * 2) - 1, y + sy * (5 + i * 2) - 1, 3, 3);
+      }
+    }
   }
 }

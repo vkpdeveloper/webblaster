@@ -31,11 +31,33 @@ Load manually: `chrome://extensions` → Developer mode → Load unpacked → `.
 Start with the toolbar popup, `Alt+Shift+D`, or right-click → **Blast this page**. Trigger again to exit.
 
 `A`/`D` run · `Space` jump (somersault), tap again in the air for a second jump, hold to fly on rocket boots ·
-`S` drop · click shoot · right-click / `G` grenade · `1-5` / wheel / `Q` `E` weapons · `Esc` pause · `M` mute
+`S` drop · click shoot · right-click / `G` grenade · `1-5` / wheel / `Q` `E` weapons · `F` rage · `Esc` pause · `M` mute
 
 Arcade run-and-gun rules: you have three lives, enemy soldiers storm the page (runners from the edges and
 paratroopers from above, snipers on page elements), and one hit costs a life. Weapons are rifle, machine gun,
 spread gun, rocket launcher and laser. Enemies can be switched off in the popup or the pause menu.
+
+Everything you wreck feeds a **combo**: each word, image or soldier that goes down adds to the chain, as long as
+you keep hitting things within about two seconds. Longer chains multiply your score (up to x8) and climb a musical
+scale. The combo also fills the **rage** bar; when it's full, press `F` for ten seconds of double fire rate,
+bigger blasts and invulnerability.
+
+### Game feel
+
+The game is tuned to feel good to blast things with, using the usual tricks from Vlambeer's "The Art of
+Screenshake" and Squirrel Eiserloh's GDC talk on camera shake:
+
+- Trauma-based screen shake (shake grows with trauma squared, smooth noise, a little roll on the biggest hits) plus
+  a camera kick against your aim on every shot.
+- Hitstop: the action freezes for a few frames on kills and big collapses, and drops into slow motion for multi
+  kills and huge collapses.
+- White impact frames, sparks that kick back toward you, scorch marks around craters, debris that piles up, and
+  shell casings that clink around the floor.
+- Enemies get knocked back, flash and go flying off the page. The crosshair spreads as you fire and shows a hit
+  marker when you connect.
+- Layered, slightly randomized sounds through a limiter, so a pile of explosions hits hard instead of clipping.
+
+Screen shake and flashes are toned down when the OS "reduce motion" setting is on.
 
 ### x.com sidekick
 
@@ -43,7 +65,8 @@ On x.com the commando waits at the bottom of the screen. Click **Like**, **Bookm
 **Quote** in the repost menu, and he shoots the button from where he stands, then your click goes through. Hover
 over him and he breaks into a Bollywood routine: light bulb, shoulder shimmy, pat-the-dog, bhangra and a spin, with
 notes and marigolds, to Raj's "My Heart, My Universe" from _The Big Bang Theory_ (see [Credits](#credits)). The steps
-are locked to the song's beat. Toggle it with **X.COM SIDEKICK** in the popup.
+are locked to the song's beat. Shots in quick succession build a streak: the counter over the button grows and the
+hit sound climbs the scale. Toggle it with **X.COM SIDEKICK** in the popup.
 
 ## How it works
 

@@ -63,7 +63,7 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; cursor: n
 .fuel img { image-rendering: pixelated; display: block; }
 .fuel .bar { height: 5px; }
 .fuel .bar i { --fill: ${P.orange}; transition: none; }
-.hint { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); white-space: nowrap; font-size: 7px;
+.hint { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); white-space: nowrap; font-size: 7px;
   color: ${P.white}; background: rgba(0,0,0,0.8); padding: 6px 10px; box-shadow: ${px(P.lavender, 2)};
   transition: opacity 1s; }
 .hint kbd { color: ${P.yellow}; font-family: inherit; }
@@ -88,6 +88,30 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; cursor: n
 .window button.sel::before { opacity: 1; animation: blink 0.6s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .footer { font-size: 8px; color: ${P.slate}; text-align: center; padding: 0 18px 14px; }
+
+.callout { position: absolute; left: 0; right: 0; top: 20%; text-align: center; font-size: 26px; color: var(--c, ${P.yellow});
+  text-shadow: ${px(P.black, 3)}, 3px 3px 0 ${P.black}, 6px 6px 0 ${P.black}; opacity: 0; pointer-events: none; }
+.callout.show { animation: slam 1.2s steps(14) forwards; }
+@keyframes slam { 0% { opacity: 1; transform: scale(2.6) rotate(-4deg); } 12% { transform: scale(0.92) rotate(1deg); }
+  20% { transform: scale(1.06); } 28% { transform: scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translateY(-14px); } }
+/* Combo counter, right of center: the chain length, the score multiplier and a fuse that burns down. */
+.combo { position: absolute; right: 18px; top: 26%; text-align: right; opacity: 0; transition: opacity 0.25s; color: var(--c, ${P.white}); }
+.combo.on { opacity: 1; }
+.combo .n { display: block; font-size: 30px; transform-origin: right center;
+  text-shadow: ${px(P.black, 3)}, 3px 3px 0 ${P.black}, 5px 5px 0 ${P.black}; }
+.combo .lbl { font-size: 8px; color: ${P.white}; text-shadow: ${px(P.black, 2)}; }
+.combo .mult { font-size: 10px; color: ${P.yellow}; text-shadow: ${px(P.black, 2)}, 3px 3px 0 ${P.black}; margin-top: 4px; }
+.combo .fuse { height: 4px; margin-top: 6px; margin-left: auto; width: 110px; background: rgba(0,0,0,0.6); box-shadow: ${px(P.black, 1)}; }
+.combo .fuse i { display: block; height: 100%; width: 100%; background: var(--c, ${P.white}); }
+.rage { display: flex; gap: 6px; align-items: center; width: 200px; font-size: 7px; color: ${P.red}; }
+.rage .bar { height: 6px; }
+.rage .bar i { --fill: ${P.red}; transition: none; }
+.rage .key { color: ${P.yellow}; display: none; white-space: nowrap; }
+.rage.ready .key { display: inline; animation: blink 0.3s steps(1) infinite; }
+.rage.ready .bar i { --fill: ${P.yellow}; }
+.rage.active .bar i { --fill: ${P.orange}; animation: blink 0.15s steps(1) infinite; }
+.score.bump { animation: bump 0.25s steps(3); display: inline-block; transform-origin: left center; }
+@keyframes bump { 0% { transform: scale(1.5); color: ${P.yellow}; } 100% { transform: scale(1); } }
 
 .toast { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: ${P.black}; color: ${P.red};
   padding: 10px 14px; box-shadow: ${px(P.red, 2)}; font-size: 10px; pointer-events: none; }
@@ -118,6 +142,17 @@ export class Hud {
   private nadeReady = true;
   private hint: HTMLElement;
   private banner: HTMLElement;
+  private calloutEl: HTMLElement;
+  private comboEl: HTMLElement;
+  private comboN: HTMLElement;
+  private comboMult: HTMLElement;
+  private comboFuse: HTMLElement;
+  private lastCombo = 0;
+  private lastFuse = -1;
+  private lastPop = 0;
+  private rageEl: HTMLElement;
+  private rageFill: HTMLElement;
+  private lastRage = -1;
   private menu: HTMLElement;
   private buttons: HTMLButtonElement[] = [];
   private sel = 0;
@@ -132,7 +167,7 @@ export class Hud {
     const player = el('div', 'player');
     const scoreRow = el('div');
     scoreRow.append(el('span', 'p1', '1P'));
-    this.scoreEl = el('span', 'score', '0000000');
+    this.scoreEl = el('span', 'score', '00000000');
     scoreRow.append(this.scoreEl);
     this.livesEl = el('div', 'lives');
     player.append(scoreRow, this.livesEl);
@@ -174,19 +209,32 @@ export class Hud {
     flame.src = iconUrl(ICONS.flame, 2);
     flame.alt = 'jet';
     fuel.append(flame, fbar);
-    bottom.append(weapons, fuel);
+    this.rageEl = el('div', 'rage');
+    const rbar = el('div', 'bar');
+    this.rageFill = el('i');
+    rbar.append(this.rageFill);
+    this.rageEl.append(el('span', '', 'RAGE'), rbar, el('span', 'key', 'PRESS F!'));
+    bottom.append(weapons, fuel, this.rageEl);
     this.medalUrl = iconUrl(ICONS.medal, 2);
 
     this.hint = el(
       'div',
       'hint',
-      '<kbd>A D</kbd> RUN &nbsp; <kbd>SPACE</kbd> JUMP &middot; HOLD TO FLY &nbsp; <kbd>S</kbd> DROP &nbsp; <kbd>CLICK</kbd> SHOOT &nbsp; <kbd>R-CLICK</kbd> GRENADE &nbsp; <kbd>1-5</kbd> WEAPON &nbsp; <kbd>ESC</kbd> PAUSE',
+      '<kbd>A D</kbd> RUN &nbsp; <kbd>SPACE</kbd> JUMP &middot; HOLD TO FLY &nbsp; <kbd>S</kbd> DROP &nbsp; <kbd>CLICK</kbd> SHOOT &nbsp; <kbd>R-CLICK</kbd> GRENADE &nbsp; <kbd>1-5</kbd> WEAPON &nbsp; <kbd>F</kbd> RAGE &nbsp; <kbd>ESC</kbd> PAUSE',
     );
     this.banner = el('div', 'banner');
+    this.calloutEl = el('div', 'callout');
+    this.comboEl = el('div', 'combo');
+    this.comboN = el('span', 'n');
+    this.comboMult = el('div', 'mult');
+    const fuse = el('div', 'fuse');
+    this.comboFuse = el('i');
+    fuse.append(this.comboFuse);
+    this.comboEl.append(this.comboN, el('span', 'lbl', 'COMBO'), this.comboMult, fuse);
     this.menu = el('div', 'menu hidden');
     this.menu.addEventListener('mousedown', (e) => e.stopPropagation());
 
-    hud.append(top, bottom, this.hint, this.banner);
+    hud.append(top, bottom, this.hint, this.banner, this.calloutEl, this.comboEl);
     this.root.append(this.canvas, hud, this.menu, el('div', 'crt'));
   }
 
@@ -215,8 +263,13 @@ export class Hud {
 
   setScore(score: number): void {
     if (score === this.lastScore) return;
+    if (score - this.lastScore >= 500 && this.lastScore >= 0) {
+      this.scoreEl.classList.remove('bump');
+      void this.scoreEl.offsetWidth;
+      this.scoreEl.classList.add('bump');
+    }
     this.lastScore = score;
-    this.scoreEl.textContent = String(Math.min(9999999, score)).padStart(7, '0');
+    this.scoreEl.textContent = String(Math.min(99999999, score)).padStart(8, '0');
   }
 
   setLives(n: number): void {
@@ -228,6 +281,49 @@ export class Hud {
         return img;
       }),
     );
+  }
+
+  /** Combo chain length and score multiplier; hidden below 3 hits. Pops on every step. */
+  setCombo(n: number, mult: number, color: string): void {
+    if (n === this.lastCombo) return;
+    const up = n > this.lastCombo;
+    this.lastCombo = n;
+    this.comboEl.classList.toggle('on', n >= 3);
+    if (n < 3) return;
+    this.comboEl.style.setProperty('--c', color);
+    this.comboN.textContent = `x${n}`;
+    this.comboMult.textContent = mult > 1 ? `SCORE x${mult}` : '';
+    const now = performance.now();
+    if (up && now - this.lastPop > 60) {
+      this.lastPop = now;
+      this.comboN.animate([{ transform: 'scale(1.4)' }, { transform: 'scale(1)' }], { duration: 140, easing: 'steps(3)' });
+    }
+  }
+
+  /** How much of the combo window is left, 0..1. */
+  setComboFuse(f: number): void {
+    const v = Math.round(f * 50);
+    if (v === this.lastFuse) return;
+    this.lastFuse = v;
+    this.comboFuse.style.width = `${v * 2}%`;
+  }
+
+  /** Big slammed-in text: combo tiers, multi kills, rage. */
+  callout(text: string, color: string = P.yellow): void {
+    this.calloutEl.textContent = text;
+    this.calloutEl.style.setProperty('--c', color);
+    this.calloutEl.classList.remove('show');
+    void this.calloutEl.offsetWidth;
+    this.calloutEl.classList.add('show');
+  }
+
+  setRage(f: number, ready: boolean, active: boolean): void {
+    const v = Math.round(f * 100);
+    this.rageEl.classList.toggle('ready', ready);
+    this.rageEl.classList.toggle('active', active);
+    if (v === this.lastRage) return;
+    this.lastRage = v;
+    this.rageFill.style.width = `${v}%`;
   }
 
   setGrenadeReady(ready: boolean): void {

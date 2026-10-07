@@ -1,9 +1,8 @@
 import { capturePage } from '@/lib/capture';
+import { FONT, loadFont } from '@/lib/font';
 import { Game } from '@/lib/game/game';
 import { P } from '@/lib/palette';
 import { addStats, loadSettings, settingsItem, statsItem } from '@/lib/settings';
-
-const FONT = 'WBPixel';
 
 interface Session {
   game: Game | null;
@@ -46,18 +45,6 @@ export default defineContentScript({
     }
   },
 });
-
-async function loadFont(): Promise<void> {
-  if ([...document.fonts].some((f) => f.family === FONT)) return;
-  try {
-    const res = await fetch(browser.runtime.getURL('/fonts/PressStart2P.ttf'));
-    const face = new FontFace(FONT, await res.arrayBuffer());
-    await face.load();
-    document.fonts.add(face);
-  } catch (e) {
-    console.warn('[web-blaster] font failed, using monospace:', e);
-  }
-}
 
 function toast(text: string): void {
   const el = document.createElement('div');
